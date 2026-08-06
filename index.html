@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LeagueHub - Gestor de Liga Deportiva</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <!-- Chart.js para visualización de estadísticas -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+  <!-- Componente Barra de Navegación -->
+  <header>
+    <nav class="navbar">
+      <div class="nav-brand">
+        <a href="#dashboard" id="nav-logo">LeagueHub</a>
+        <span id="active-league-badge" class="badge">Sin liga activa</span>
+      </div>
+      <ul class="nav-links">
+        <li><a href="#dashboard">Dashboard</a></li>
+        <li><a href="#leagues">Ligas</a></li>
+        <li><a href="#teams">Equipos</a></li>
+        <li><a href="#players">Jugadores</a></li>
+        <li><a href="#matches">Partidos</a></li>
+        <li><a href="#stats">Estadísticas</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <!-- Contenedor Principal donde "saltan" las Vistas -->
+  <main id="app">
+    
+  </main>
+
+  <!-- Footer Persistente -->
+  <footer>
+    <p>LeagueHub &copy; 2026 | Desarrollado por Luis Javier</p>
+    <div id="db-status" class="status-indicator">Estado DB: Inicializando...</div>
+  </footer>
+
+  <!-- Carga del Punto de Entrada -->
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
