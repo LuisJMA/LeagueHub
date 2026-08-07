@@ -2,6 +2,7 @@
 
 import { calculateMatchPoints } from '../utils/sports-rules.js';
 import { generateRoundRobin, generatePlayoffs } from '../utils/fixture-generator.js';
+
 const DB_NAME = 'leaguehub-db';
 const DB_VERSION = 1;
 
@@ -148,116 +149,200 @@ export async function getActiveLeague() {
   return leagues.find(l => l.isActive) || null;
 }
 
-
-
-
 /**
  * Transacción atómica para finalizar un partido y actualizar la tabla de posiciones
  */
 export async function finishMatchTransaction(matchId, scoreHome, scoreAway, playerStats = []) {
-  const db = await getDB();
-  const tx = db.transaction(['matches', 'teams', 'players', 'leagues'], 'readwrite');
-  
-  const matchStore = tx.objectStore('matches');
-  const teamStore = tx.objectStore('teams');
-  const playerStore = tx.objectStore('players');
-  const leagueStore = tx.objectStore('leagues');
+  const db = await openDB();
 
-  const match = await matchStore.get(matchId);
-  const league = await leagueStore.get(match.leagueId);
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['matches', 'teams', 'players', 'leagues'], 'readwrite');
+    
+    const matchStore = tx.objectStore('matches');
+    const teamStore = tx.objectStore('teams');
+    const playerStore = tx.objectStore('players');
+    const leagueStore = tx.objectStore('leagues');
 
-  // Validaciones
-  if (match.status === 'FINISHED') throw new Error('El partido ya está finalizado.');
-  if (league.format === 'SINGLE_ELIMINATION' && scoreHome === scoreAway) {
-    throw new Error('No se permiten empates en eliminación directa.');
-  }
+    tx.onerror = (e) => reject(e.target.error || 'Error en la transacción');
+    tx.oncomplete = () => resolve(true);
 
-  // 1. Marcar como finalizado
-  match.scoreHome = scoreHome;
-  match.scoreAway = scoreAway;
-  match.status = 'FINISHED';
-  await matchStore.put(match);
-
-  // 2. Sumar puntos/goles a los equipos
-  // ... (actualización de PG, PE, PP, GF, GC, PTS según corresponda)
-
-  // 3. Sumar estadísticas individuales a cada jugador
-  for (const stat of playerStats) {
-    const player = await playerStore.get(stat.playerId);
-    if (player) {
-      player.stats.goals = (player.stats.goals || 0) + stat.goals;
-      player.stats.assists = (player.stats.assists || 0) + stat.assists;
-      await playerStore.put(player);
-    }
-  }
-
-  // 4. Avance automático en el Bracket (Eliminación Directa)
-  if (league.format === 'SINGLE_ELIMINATION' && match.nextMatchId) {
-    const winnerId = scoreHome > scoreAway ? match.homeTeamId : match.awayTeamId;
-    const nextMatch = await matchStore.get(match.nextMatchId);
-
-    if (nextMatch) {
-      if (match.slot === 'home') {
-        nextMatch.homeTeamId = winnerId;
-      } else if (match.slot === 'away') {
-        nextMatch.awayTeamId = winnerId;
+    const matchReq = matchStore.get(Number(matchId));
+    matchReq.onsuccess = () => {
+      const match = matchReq.result;
+      if (!match) return reject('Partido no encontrado');
+      if (match.status === 'FINISHED' || match.status === 'completed') {
+        return reject('El partido ya está finalizado.');
       }
-      await matchStore.put(nextMatch);
-    }
-  }
 
-  await tx.done;
+      const leagueReq = leagueStore.get(match.leagueId);
+      leagueReq.onsuccess = () => {
+        const league = leagueReq.result;
+
+        if (league.format === 'playoffs' && scoreHome === scoreAway) {
+          return reject('No se permiten empates en eliminación directa.');
+        }
+
+        // 1. Actualizar estado del partido
+        match.homeScore = Number(scoreHome);
+        match.awayScore = Number(scoreAway);
+        match.status = 'completed';
+        matchStore.put(match);
+
+        // 2. Actualizar estadísticas de los equipos
+        const pts = calculateMatchPoints(league.sport, scoreHome, scoreAway);
+
+        const homeTeamReq = teamStore.get(match.homeTeamId);
+        homeTeamReq.onsuccess = () => {
+          const homeTeam = homeTeamReq.result;
+          if (homeTeam) {
+            homeTeam.pj = (homeTeam.pj || 0) + 1;
+            homeTeam.gf = (homeTeam.gf || 0) + Number(scoreHome);
+            homeTeam.gc = (homeTeam.gc || 0) + Number(scoreAway);
+            homeTeam.points = (homeTeam.points || 0) + pts.homePoints;
+
+            if (scoreHome > scoreAway) homeTeam.pg = (homeTeam.pg || 0) + 1;
+            else if (scoreHome < scoreAway) homeTeam.pp = (homeTeam.pp || 0) + 1;
+            else homeTeam.pe = (homeTeam.pe || 0) + 1;
+
+            teamStore.put(homeTeam);
+          }
+        };
+
+        const awayTeamReq = teamStore.get(match.awayTeamId);
+        awayTeamReq.onsuccess = () => {
+          const awayTeam = awayTeamReq.result;
+          if (awayTeam) {
+            awayTeam.pj = (awayTeam.pj || 0) + 1;
+            awayTeam.gf = (awayTeam.gf || 0) + Number(scoreAway);
+            awayTeam.gc = (awayTeam.gc || 0) + Number(scoreHome);
+            awayTeam.points = (awayTeam.points || 0) + pts.awayPoints;
+
+            if (scoreAway > scoreHome) awayTeam.pg = (awayTeam.pg || 0) + 1;
+            else if (scoreAway < scoreHome) awayTeam.pp = (awayTeam.pp || 0) + 1;
+            else awayTeam.pe = (awayTeam.pe || 0) + 1;
+
+            teamStore.put(awayTeam);
+          }
+        };
+
+        // 3. Actualizar estadísticas de jugadores
+        for (const stat of playerStats) {
+          const pReq = playerStore.get(stat.playerId);
+          pReq.onsuccess = () => {
+            const player = pReq.result;
+            if (player) {
+              player.goals = (player.goals || 0) + (stat.goals || 1);
+              playerStore.put(player);
+            }
+          };
+        }
+
+        // 4. Avance automático en playoffs
+        if (league.format === 'playoffs' && match.nextMatchId) {
+          const winnerId = scoreHome > scoreAway ? match.homeTeamId : match.awayTeamId;
+          const nextMatchReq = matchStore.get(match.nextMatchId);
+
+          nextMatchReq.onsuccess = () => {
+            const nextMatch = nextMatchReq.result;
+            if (nextMatch) {
+              if (match.slot === 'home') nextMatch.homeTeamId = winnerId;
+              else if (match.slot === 'away') nextMatch.awayTeamId = winnerId;
+              matchStore.put(nextMatch);
+            }
+          };
+        }
+      };
+    };
+  });
 }
 
 /**
  * Transacción atómica para revertir un partido finalizado
  */
-export async function undoMatchTransaction(matchId, playerStatsToRollback = []) {
-  const db = await getDB();
-  const tx = db.transaction(['matches', 'teams', 'players', 'leagues'], 'readwrite');
-  
-  const matchStore = tx.objectStore('matches');
-  const teamStore = tx.objectStore('teams');
-  const playerStore = tx.objectStore('players');
+export async function undoMatchTransaction(matchId) {
+  const db = await openDB();
 
-  const match = await matchStore.get(matchId);
-  if (match.status !== 'FINISHED') throw new Error('El partido no está finalizado.');
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['matches', 'teams', 'players', 'leagues'], 'readwrite');
+    const matchStore = tx.objectStore('matches');
+    const teamStore = tx.objectStore('teams');
+    const leagueStore = tx.objectStore('leagues');
 
-  // Bloqueo de Rollback en Eliminación Directa
-  if (match.nextMatchId) {
-    const nextMatch = await matchStore.get(match.nextMatchId);
-    if (nextMatch && nextMatch.status === 'FINISHED') {
-      throw new Error('No puedes deshacer este partido porque el partido de la siguiente ronda ya se jugó.');
-    }
-    
-    // Limpiar el slot asignado en el siguiente partido si aún no se juega
-    if (nextMatch) {
-      if (match.slot === 'home') nextMatch.homeTeamId = null;
-      if (match.slot === 'away') nextMatch.awayTeamId = null;
-      await matchStore.put(nextMatch);
-    }
-  }
+    tx.onerror = (e) => reject(e.target.error || 'Error al revertir partido');
+    tx.oncomplete = () => resolve(true);
 
-  // 1. Restar estadísticas individuales a los jugadores
-  for (const stat of playerStatsToRollback) {
-    const player = await playerStore.get(stat.playerId);
-    if (player) {
-      player.stats.goals = Math.max(0, (player.stats.goals || 0) - stat.goals);
-      player.stats.assists = Math.max(0, (player.stats.assists || 0) - stat.assists);
-      await playerStore.put(player);
-    }
-  }
+    const matchReq = matchStore.get(Number(matchId));
+    matchReq.onsuccess = () => {
+      const match = matchReq.result;
+      if (!match || (match.status !== 'FINISHED' && match.status !== 'completed')) {
+        return reject('El partido no está finalizado.');
+      }
 
-  // 2. Restar estadísticas a los equipos
-  // ... (revertir PG, PE, PP, GF, GC, PTS)
+      const leagueReq = leagueStore.get(match.leagueId);
+      leagueReq.onsuccess = () => {
+        const league = leagueReq.result;
 
-  // 3. Restaurar estado del partido
-  match.status = 'PENDING';
-  match.scoreHome = null;
-  match.scoreAway = null;
-  await matchStore.put(match);
+        // Validar que la siguiente ronda no se haya jugado
+        if (match.nextMatchId) {
+          const nextMatchReq = matchStore.get(match.nextMatchId);
+          nextMatchReq.onsuccess = () => {
+            const nextMatch = nextMatchReq.result;
+            if (nextMatch && (nextMatch.status === 'FINISHED' || nextMatch.status === 'completed')) {
+              return reject('No puedes deshacer este partido porque la siguiente ronda ya fue jugada.');
+            }
+            if (nextMatch) {
+              if (match.slot === 'home') nextMatch.homeTeamId = null;
+              if (match.slot === 'away') nextMatch.awayTeamId = null;
+              matchStore.put(nextMatch);
+            }
+          };
+        }
 
-  await tx.done;
+        // Restar puntos y estadísticas a los equipos
+        const pts = calculateMatchPoints(league.sport, match.homeScore, match.awayScore);
+
+        const homeTeamReq = teamStore.get(match.homeTeamId);
+        homeTeamReq.onsuccess = () => {
+          const homeTeam = homeTeamReq.result;
+          if (homeTeam) {
+            homeTeam.pj = Math.max(0, (homeTeam.pj || 0) - 1);
+            homeTeam.gf = Math.max(0, (homeTeam.gf || 0) - match.homeScore);
+            homeTeam.gc = Math.max(0, (homeTeam.gc || 0) - match.awayScore);
+            homeTeam.points = Math.max(0, (homeTeam.points || 0) - pts.homePoints);
+
+            if (match.homeScore > match.awayScore) homeTeam.pg = Math.max(0, (homeTeam.pg || 0) - 1);
+            else if (match.homeScore < match.awayScore) homeTeam.pp = Math.max(0, (homeTeam.pp || 0) - 1);
+            else homeTeam.pe = Math.max(0, (homeTeam.pe || 0) - 1);
+
+            teamStore.put(homeTeam);
+          }
+        };
+
+        const awayTeamReq = teamStore.get(match.awayTeamId);
+        awayTeamReq.onsuccess = () => {
+          const awayTeam = awayTeamReq.result;
+          if (awayTeam) {
+            awayTeam.pj = Math.max(0, (awayTeam.pj || 0) - 1);
+            awayTeam.gf = Math.max(0, (awayTeam.gf || 0) - match.awayScore);
+            awayTeam.gc = Math.max(0, (awayTeam.gc || 0) - match.homeScore);
+            awayTeam.points = Math.max(0, (awayTeam.points || 0) - pts.awayPoints);
+
+            if (match.awayScore > match.homeScore) awayTeam.pg = Math.max(0, (awayTeam.pg || 0) - 1);
+            else if (match.awayScore < match.homeScore) awayTeam.pp = Math.max(0, (awayTeam.pp || 0) - 1);
+            else awayTeam.pe = Math.max(0, (awayTeam.pe || 0) - 1);
+
+            teamStore.put(awayTeam);
+          }
+        };
+
+        // Reestablecer partido a pendiente
+        match.status = 'scheduled';
+        match.homeScore = 0;
+        match.awayScore = 0;
+        matchStore.put(match);
+      };
+    };
+  });
 }
 
 export async function generateLeagueFixtureTransaction(leagueId) {
@@ -316,7 +401,6 @@ export async function dbDelete(storeName, id) {
     request.onerror = () => reject(`Error al eliminar registro ${id} de ${storeName}`);
   });
 }
-
 
 /**
  * Exporta toda la base de datos IndexedDB a un objeto JSON
