@@ -284,11 +284,93 @@ export async function renderPlayerDetail(id) {
   `;
 }
 
-export function renderMatches() {
-  document.getElementById('app').innerHTML = `
-    <h2>Partidos</h2>
-    <p>Calendario y programación de la liga activa.</p>
+
+
+
+export async function renderMatches() {
+  const app = document.getElementById('app');
+  const activeLeague = await getActiveLeague();
+
+  if (!activeLeague) {
+    app.innerHTML = `
+      <h2>Gestión de Partidos</h2>
+      <p style="color: red; font-weight: bold;">⚠️ Debes activar o crear una liga primero para gestionar partidos.</p>
+      <a href="#leagues">Ir a Gestión de Ligas</a>
+    `;
+    return;
+  }
+
+  const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+  const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
+
+  let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+
+  let matchesListHTML = '';
+  if (matches.length === 0) {
+    matchesListHTML = '<p>No hay partidos programados en esta liga.</p>';
+  } else {
+    matchesListHTML = matches.map(m => {
+      const home = teams.find(t => t.id === Number(m.homeTeamId));
+      const away = teams.find(t => t.id === Number(m.awayTeamId));
+      return `
+        <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
+          <h4>${home ? home.name : 'Equipo 1'} vs ${away ? away.name : 'Equipo 2'}</h4>
+          <p><strong>Estado:</strong> ${m.status === 'completed' ? 'Finalizado 🏁' : 'Pendiente ⏳'}</p>
+          <p><strong>Resultado:</strong> ${m.homeScore ?? 0} - ${m.awayScore ?? 0}</p>
+          <a href="#match/${m.id}">Cargar Marcador / Eventos</a>
+        </div>
+      `;
+    }).join('');
+  }
+
+  app.innerHTML = `
+    <h2>Programación de Partidos (${activeLeague.name})</h2>
+
+    ${teams.length < 2 ? '<p style="color: orange;">⚠️ Necesitas al menos 2 equipos para programar un partido.</p>' : `
+      <form id="form-create-match" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+        <h3>Programar Nuevo Partido</h3>
+        <div>
+          <label>Equipo Local:</label><br>
+          <select id="home-team" required>${teamsOptionsHTML}</select>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Equipo Visitante:</label><br>
+          <select id="away-team" required>${teamsOptionsHTML}</select>
+        </div>
+        <button type="submit" style="margin-top: 15px;">Crear Partido</button>
+      </form>
+    `}
+
+    <hr>
+    <h3>Calendario de Partidos</h3>
+    <div id="matches-container">${matchesListHTML}</div>
   `;
+
+  const form = document.getElementById('form-create-match');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const homeId = Number(document.getElementById('home-team').value);
+      const awayId = Number(document.getElementById('away-team').value);
+
+      if (homeId === awayId) {
+        alert('El equipo local y el visitante no pueden ser el mismo.');
+        return;
+      }
+
+      const newMatch = {
+        leagueId: activeLeague.id,
+        homeTeamId: homeId,
+        awayTeamId: awayId,
+        homeScore: 0,
+        awayScore: 0,
+        status: 'scheduled'
+      };
+
+      await dbPut('matches', newMatch);
+      renderMatches();
+    });
+  }
 }
 
 export function renderMatchDetail(id) {
