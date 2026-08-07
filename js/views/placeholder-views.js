@@ -124,6 +124,7 @@ export async function renderLeagues() {
         </div>
         <div>
           ${!l.isActive ? `<button data-id="${l.id}" class="btn-activate">Establecer como Activa</button>` : ''}
+          <button data-id="${l.id}" class="btn-edit-league" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">✏️ Editar</button>
           <button data-id="${l.id}" class="btn-delete-league" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">🗑️ Eliminar</button>
         </div>
       </div>
@@ -225,6 +226,23 @@ export async function renderLeagues() {
     });
   });
 
+  // Listener para editar liga
+  app.querySelectorAll('.btn-edit-league').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = Number(e.target.dataset.id);
+      const allLeagues = await dbGetAll('leagues');
+      const league = allLeagues.find(l => l.id === id);
+      if (!league) return;
+
+      const newName = prompt('Nuevo nombre de la liga:', league.name);
+      if (newName !== null && newName.trim() !== '') {
+        league.name = newName.trim();
+        await dbPut('leagues', league);
+        renderLeagues();
+      }
+    });
+  });
+
   // Listener para eliminar liga en cascada
   app.querySelectorAll('.btn-delete-league').forEach(btn => {
     btn.addEventListener('click', async (e) => {
@@ -268,9 +286,12 @@ export async function renderTeams() {
           <p><strong>PJ:</strong> ${t.pj || 0} | <strong>PG:</strong> ${t.pg || 0} | <strong>PP:</strong> ${t.pp || 0} | <strong>Puntos:</strong> ${t.points || 0}</p>
           <a href="#team/${t.id}">Ver Detalle del Equipo</a>
         </div>
-        <button class="btn-delete-team" data-id="${t.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
-          🗑️ Eliminar
-        </button>
+        <div>
+          <button class="btn-edit-team" data-id="${t.id}" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">✏️ Editar</button>
+          <button class="btn-delete-team" data-id="${t.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">
+            🗑️ Eliminar
+          </button>
+        </div>
       </div>
     `).join('');
   }
@@ -347,6 +368,28 @@ export async function renderTeams() {
       renderTeams();
     });
   }
+
+  // Listener para editar equipo
+  app.querySelectorAll('.btn-edit-team').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const teamId = Number(e.target.dataset.id);
+      const leagueTeams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+      const team = leagueTeams.find(t => t.id === teamId);
+      if (!team) return;
+
+      const newName = prompt('Nuevo nombre del equipo:', team.name);
+      if (newName !== null && newName.trim() !== '') {
+        const isDuplicate = leagueTeams.some(t => t.id !== teamId && t.name.toLowerCase() === newName.trim().toLowerCase());
+        if (isDuplicate) {
+          alert(`⚠️ Ya existe un equipo llamado "${newName.trim()}" en esta liga.`);
+          return;
+        }
+        team.name = newName.trim();
+        await dbPut('teams', team);
+        renderTeams();
+      }
+    });
+  });
 
   // Listener para eliminar equipo con validación de partidos existentes
   app.querySelectorAll('.btn-delete-team').forEach(btn => {
@@ -480,9 +523,12 @@ export async function renderPlayers() {
             <p><strong>Anotaciones/Goles:</strong> ${p.goals || 0}</p>
             <a href="#player/${p.id}">Ver Perfil del Jugador</a>
           </div>
-          <button class="btn-delete-player" data-id="${p.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
-            🗑️ Eliminar
-          </button>
+          <div>
+            <button class="btn-edit-player" data-id="${p.id}" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">✏️ Editar</button>
+            <button class="btn-delete-player" data-id="${p.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">
+              🗑️ Eliminar
+            </button>
+          </div>
         </div>
       `;
     }).join('');
@@ -560,9 +606,46 @@ export async function renderPlayers() {
     });
   }
 
+  // Listener para editar jugador
+  app.querySelectorAll('.btn-edit-player').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const playerId = Number(e.target.dataset.id);
+      const freshPlayers = await dbGetAll('players');
+      const player = freshPlayers.find(p => Number(p.id) === playerId);
+      if (!player) return;
+
+      const newName = prompt('Nuevo nombre del jugador:', player.name);
+      if (newName === null) return;
+
+      const newDorsalStr = prompt('Nuevo dorsal (0-99):', player.dorsal);
+      if (newDorsalStr === null) return;
+      const newDorsal = Number(newDorsalStr);
+
+      const newPosition = prompt('Nueva posición:', player.position);
+      if (newPosition === null) return;
+
+      if (newName.trim() !== '') player.name = newName.trim();
+      if (!isNaN(newDorsal) && newDorsal >= 0 && newDorsal <= 99) {
+        // Validar si el dorsal ya lo ocupa otro jugador del mismo equipo
+        const teamId = Number(player.teamId);
+        const duplicate = freshPlayers.some(p => Number(p.teamId) === teamId && Number(p.dorsal) === newDorsal && Number(p.id) !== playerId);
+        if (duplicate) {
+          alert(`⚠️ El dorsal #${newDorsal} ya está ocupado por otro jugador en este equipo.`);
+          return;
+        }
+        player.dorsal = newDorsal;
+      }
+      if (newPosition.trim() !== '') player.position = newPosition.trim();
+
+      await dbPut('players', player);
+      renderPlayers();
+    });
+  });
+
+  // Listener para eliminar jugador
   app.querySelectorAll('.btn-delete-player').forEach(btn => {
     btn.addEventListener('click', async (e) => {
-      const playerId = e.target.dataset.id;
+      const playerId = Number(e.target.dataset.id);
       if (confirm('¿Seguro que deseas eliminar este jugador?')) {
         await dbDelete('players', playerId);
         renderPlayers();
