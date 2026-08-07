@@ -117,11 +117,14 @@ export async function dbGetByIndex(storeName, indexName, value) {
   });
 }
 
+
 /**
- * Transacción Atómica: Activa una liga y desactiva todas las demás
+ * Activa una liga en DB y guarda su ID en localStorage
  */
 export async function setActiveLeague(leagueId) {
   const db = await openDB();
+  const idNum = Number(leagueId);
+
   return new Promise((resolve, reject) => {
     const tx = db.transaction('leagues', 'readwrite');
     const store = tx.objectStore('leagues');
@@ -130,10 +133,11 @@ export async function setActiveLeague(leagueId) {
 
     getAllReq.onsuccess = () => {
       const leagues = getAllReq.result;
-      leagues.forEach(league => {
-        league.isActive = (league.id === leagueId);
+      leagues.forEach((league) => {
+        league.isActive = league.id === idNum;
         store.put(league);
       });
+      localStorage.setItem('activeLeagueId', idNum);
     };
 
     tx.oncomplete = () => resolve(true);
@@ -433,4 +437,62 @@ export async function importDatabase(jsonData) {
       }
     }
   }
+}
+
+
+/**
+ * Transacción Atómica: Elimina una liga y todos sus registros asociados (cascada)
+ */
+export async function deleteLeagueCascade(leagueId) {
+  const db = await openDB();
+  const idNum = Number(leagueId);
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['leagues', 'teams', 'players', 'matches', 'events'], 'readwrite');
+
+    tx.onerror = (e) => reject(e.target.error || 'Error al eliminar la liga en cascada');
+    tx.oncomplete = () => resolve(true);
+
+    const leagueStore = tx.objectStore('leagues');
+    const teamStore = tx.objectStore('teams');
+    const playerStore = tx.objectStore('players');
+    const matchStore = tx.objectStore('matches');
+    const eventStore = tx.objectStore('events');
+
+    // 1. Eliminar la liga
+    leagueStore.delete(idNum);
+
+    // 2. Obtener y eliminar equipos, jugadores asociados
+    const teamIndex = teamStore.index('leagueId');
+    const teamReq = teamIndex.getAll(idNum);
+
+    teamReq.onsuccess = () => {
+      const teams = teamReq.result;
+      teams.forEach((team) => {
+        // Eliminar jugadores del equipo
+        const playerIndex = playerStore.index('teamId');
+        const playerReq = playerIndex.getAll(team.id);
+        playerReq.onsuccess = () => {
+          playerReq.result.forEach((p) => playerStore.delete(p.id));
+        };
+        teamStore.delete(team.id);
+      });
+    };
+
+    // 3. Obtener y eliminar partidos y sus eventos
+    const matchIndex = matchStore.index('leagueId');
+    const matchReq = matchIndex.getAll(idNum);
+
+    matchReq.onsuccess = () => {
+      const matches = matchReq.result;
+      matches.forEach((m) => {
+        const eventIndex = eventStore.index('matchId');
+        const eventReq = eventIndex.getAll(m.id);
+        eventReq.onsuccess = () => {
+          eventReq.result.forEach((ev) => eventStore.delete(ev.id));
+        };
+        matchStore.delete(m.id);
+      });
+    };
+  });
 }
