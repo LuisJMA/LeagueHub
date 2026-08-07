@@ -541,9 +541,104 @@ export async function renderMatchDetail(id) {
   }
 }
 
-export function renderStats() {
-  document.getElementById('app').innerHTML = `
-    <h2>Tabla de Posiciones y Estadísticas</h2>
-    <p>Clasificación actual y rankings de desempeño.</p>
+export async function renderStats() {
+  const app = document.getElementById('app');
+  const activeLeague = await getActiveLeague();
+
+  if (!activeLeague) {
+    app.innerHTML = `
+      <h2>Tabla de Posiciones y Estadísticas</h2>
+      <p style="color: red; font-weight: bold;">⚠️ Selecciona una liga activa primero.</p>
+      <a href="#leagues">Ir a Ligas</a>
+    `;
+    return;
+  }
+
+  const terms = getSportTerms(activeLeague.sport);
+  const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+  const allPlayers = await dbGetAll('players');
+
+  // Ordenar equipos por Puntos y luego por Diferencia de Goles/Puntos
+  teams.sort((a, b) => {
+    const diffA = (a.gf || 0) - (a.gc || 0);
+    const diffB = (b.gf || 0) - (b.gc || 0);
+    if ((b.points || 0) !== (a.points || 0)) {
+      return (b.points || 0) - (a.points || 0);
+    }
+    return diffB - diffA;
+  });
+
+  // Filtrar y ordenar goleadores/anotadores
+  const teamIds = teams.map(t => t.id);
+  const leaguePlayers = allPlayers
+    .filter(p => teamIds.includes(Number(p.teamId)))
+    .sort((a, b) => (b.goals || 0) - (a.goals || 0));
+
+  let standingsRows = teams.map((t, index) => {
+    const diff = (t.gf || 0) - (t.gc || 0);
+    return `
+      <tr>
+        <td><strong>${index + 1}</strong></td>
+        <td>${t.name}</td>
+        <td>${t.pj || 0}</td>
+        <td>${t.pg || 0}</td>
+        <td>${t.pe || 0}</td>
+        <td>${t.pp || 0}</td>
+        <td>${t.gf || 0}</td>
+        <td>${t.gc || 0}</td>
+        <td>${diff > 0 ? '+' + diff : diff}</td>
+        <td><strong>${t.points || 0}</strong></td>
+      </tr>
+    `;
+  }).join('');
+
+  let topScorersRows = leaguePlayers.slice(0, 5).map((p, index) => {
+    const playerTeam = teams.find(t => t.id === Number(p.teamId));
+    return `
+      <tr>
+        <td><strong>${index + 1}</strong></td>
+        <td>${p.name}</td>
+        <td>${playerTeam ? playerTeam.name : 'N/A'}</td>
+        <td><strong>${p.goals || 0}</strong></td>
+      </tr>
+    `;
+  }).join('');
+
+  app.innerHTML = `
+    <h2>Tabla de Posiciones (${activeLeague.name})</h2>
+    <table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: center; margin-bottom: 30px;">
+      <thead>
+        <tr style="background: #f4f4f4;">
+          <th>#</th>
+          <th>Equipo</th>
+          <th>PJ</th>
+          <th>PG</th>
+          <th>PE</th>
+          <th>PP</th>
+          <th>${terms.gf}</th>
+          <th>${terms.gc}</th>
+          <th>DIF</th>
+          <th>PTS</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${standingsRows || '<tr><td colspan="10">No hay equipos registrados</td></tr>'}
+      </tbody>
+    </table>
+
+    <h3>Top 5 ${terms.ranking} 🏆</h3>
+    <table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: center;">
+      <thead>
+        <tr style="background: #f4f4f4;">
+          <th>#</th>
+          <th>Jugador</th>
+          <th>Equipo</th>
+          <th>${terms.events}</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${topScorersRows || '<tr><td colspan="4">No hay datos registrados</td></tr>'}
+      </tbody>
+    </table>
   `;
 }
