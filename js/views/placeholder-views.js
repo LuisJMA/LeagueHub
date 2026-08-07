@@ -1,5 +1,5 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction, exportDatabase, importDatabase, deleteLeagueCascade } from '../services/db.js';
+import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction, exportDatabase, importDatabase, deleteLeagueCascade, exportLeagueData, importLeagueData } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
 import { renderChart } from '../services/charts.js';
 
@@ -124,6 +124,7 @@ export async function renderLeagues() {
         </div>
         <div>
           ${!l.isActive ? `<button data-id="${l.id}" class="btn-activate">Establecer como Activa</button>` : ''}
+          <button data-id="${l.id}" class="btn-export-league" style="background: #17a2b8; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">📥 Exportar</button>
           <button data-id="${l.id}" class="btn-edit-league" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">✏️ Editar</button>
           <button data-id="${l.id}" class="btn-delete-league" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">🗑️ Eliminar</button>
         </div>
@@ -133,6 +134,13 @@ export async function renderLeagues() {
 
   app.innerHTML = `
     <h2>Gestión de Ligas</h2>
+
+    <!-- Sección de Importar Liga individual -->
+    <div style="background: #e9ecef; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+      <h3>📥 Importar Liga Individual (JSON)</h3>
+      <input type="file" id="import-league-file" accept=".json" style="margin-top: 5px;">
+    </div>
+
     <form id="form-create-league" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
       <h3>Crear Nueva Liga</h3>
       <div>
@@ -225,6 +233,47 @@ export async function renderLeagues() {
       renderLeagues();
     });
   });
+
+  // Listener para exportar liga individual
+  app.querySelectorAll('.btn-export-league').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const leagueId = e.target.dataset.id;
+      try {
+        const exportData = await exportLeagueData(leagueId);
+        const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+        const downloadAnchor = document.createElement('a');
+        downloadAnchor.setAttribute("href", dataStr);
+        downloadAnchor.setAttribute("download", `liga_${exportData.league.name.toLowerCase().replace(/\s+/g, '_')}_backup.json`);
+        document.body.appendChild(downloadAnchor);
+        downloadAnchor.click();
+        downloadAnchor.remove();
+      } catch (error) {
+        alert('⚠️ Error al exportar la liga: ' + error.message);
+      }
+    });
+  });
+
+  // Listener para importar liga individual
+  const fileInput = document.getElementById('import-league-file');
+  if (fileInput) {
+    fileInput.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const jsonData = JSON.parse(event.target.result);
+          await importLeagueData(jsonData);
+          alert('✅ ¡Liga importada exitosamente!');
+          renderLeagues();
+        } catch (error) {
+          alert('⚠️ El archivo no es válido o está corrupto: ' + error.message);
+        }
+      };
+      reader.readAsText(file);
+    });
+  }
 
   // Listener para editar liga
   app.querySelectorAll('.btn-edit-league').forEach(btn => {
