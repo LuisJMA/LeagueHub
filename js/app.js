@@ -13,7 +13,9 @@ const routes = {
   '#player': (id) => Views.renderPlayerDetail(id),
   '#matches': Views.renderMatches,
   '#match': (id) => Views.renderMatchDetail(id),
-  '#stats': Views.renderStats
+  '#stats': Views.renderStats,
+  '#settings': Views.renderSettings
+
 };
 
 document.addEventListener('DOMContentLoaded', async () => {
