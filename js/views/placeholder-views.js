@@ -615,10 +615,11 @@ export async function renderMatches() {
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
 
+  const isPlayoffs = activeLeague.format === 'playoffs';
   const rounds = [...new Set(matches.map(m => m.round).filter(Boolean))].sort((a, b) => a - b);
   
   let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
-  let roundsOptionsHTML = rounds.map(r => `<option value="${r}">Jornada / Ronda ${r}</option>`).join('');
+  let roundsOptionsHTML = rounds.map(r => `<option value="${r}">${isPlayoffs ? 'Ronda / Llave' : 'Jornada'} ${r}</option>`).join('');
 
   const renderMatchesList = (selectedRound = 'all') => {
     const container = document.getElementById('matches-container');
@@ -629,20 +630,24 @@ export async function renderMatches() {
       : matches.filter(m => m.round === Number(selectedRound));
 
     if (filteredMatches.length === 0) {
-      container.innerHTML = '<p>No hay partidos para mostrar en esta jornada.</p>';
+      container.innerHTML = '<p>No hay partidos para mostrar en esta jornada o llave.</p>';
       return;
     }
 
     container.innerHTML = filteredMatches.map(m => {
       const home = teams.find(t => t.id === Number(m.homeTeamId));
       const away = teams.find(t => t.id === Number(m.awayTeamId));
+
+      const homeName = home ? home.name : (isPlayoffs ? 'Por definir' : 'Equipo 1');
+      const awayName = away ? away.name : (isPlayoffs ? 'Por definir' : 'Equipo 2');
+
       return `
         <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
-          <small><strong>Jornada:</strong> ${m.round || 'N/A'}</small>
-          <h4>${home ? home.name : 'Equipo 1'} vs ${away ? away.name : 'Equipo 2'}</h4>
+          <small><strong>${isPlayoffs ? 'Fase / Ronda' : 'Jornada'}:</strong> ${m.round || 'N/A'}</small>
+          <h4>${homeName} vs ${awayName}</h4>
           <p><strong>Estado:</strong> ${m.status === 'completed' ? 'Finalizado 🏁' : 'Pendiente ⏳'}</p>
           <p><strong>Resultado:</strong> ${m.homeScore ?? 0} - ${m.awayScore ?? 0}</p>
-          <a href="#match/${m.id}">Cargar Marcador / Eventos</a>
+          ${(home && away) ? `<a href="#match/${m.id}">Cargar Marcador / Eventos</a>` : '<span style="color: #6c757d;">Esperando definición de clasificados</span>'}
         </div>
       `;
     }).join('');
@@ -653,13 +658,17 @@ export async function renderMatches() {
 
     <div style="background: #e2e3e5; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
       <h3>Generación Automática</h3>
-      <p>Crea el calendario completo para los ${teams.length} equipos de esta liga.</p>
+      <p>
+        ${isPlayoffs 
+          ? `Genera el cuadro de eliminación directa para los ${teams.length} equipos registrados.` 
+          : `Crea el calendario completo (${activeLeague.rounds || 1} vuelta/s) para los ${teams.length} equipos.`}
+      </p>
       <button id="btn-generate-fixture" style="background: #17a2b8; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer;">
         ⚡ Generar Fixture Automático
       </button>
     </div>
 
-    ${teams.length < 2 ? '<p style="color: orange;">⚠️ Necesitas al menos 2 equipos para programar un partido.</p>' : `
+    ${!isPlayoffs && teams.length >= 2 ? `
       <form id="form-create-match" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
         <h3>Programar Nuevo Partido Manual</h3>
         <div>
@@ -672,16 +681,16 @@ export async function renderMatches() {
         </div>
         <button type="submit" style="margin-top: 15px;">Crear Partido</button>
       </form>
-    `}
+    ` : ''}
 
     <hr>
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
       <h3>Calendario de Partidos</h3>
       ${rounds.length > 0 ? `
         <div>
-          <label><strong>Filtrar por Jornada:</strong></label>
+          <label><strong>Filtrar por ${isPlayoffs ? 'Ronda' : 'Jornada'}:</strong></label>
           <select id="filter-round" style="padding: 5px; margin-left: 5px;">
-            <option value="all">Todas las jornadas</option>
+            <option value="all">Ver todo</option>
             ${roundsOptionsHTML}
           </select>
         </div>
@@ -700,7 +709,6 @@ export async function renderMatches() {
     });
   }
 
-  // Listener para crear partido manual con validación de equipos distintos
   const form = document.getElementById('form-create-match');
   if (form) {
     form.addEventListener('submit', async (e) => {
@@ -730,7 +738,7 @@ export async function renderMatches() {
   const genBtn = document.getElementById('btn-generate-fixture');
   if (genBtn) {
     genBtn.addEventListener('click', async () => {
-      if (confirm('¿Generar el calendario automático? Si ya existen partidos se sumarán al listado.')) {
+      if (confirm('¿Generar el calendario automático?')) {
         try {
           await generateLeagueFixtureTransaction(activeLeague.id);
           renderMatches();
