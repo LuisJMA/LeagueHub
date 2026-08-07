@@ -163,17 +163,124 @@ export function renderTeamDetail(id) {
   `;
 }
 
-export function renderPlayers() {
-  document.getElementById('app').innerHTML = `
-    <h2>Jugadores</h2>
-    <p>Catálogo global de jugadores registrados.</p>
+
+
+
+export async function renderPlayers() {
+  const app = document.getElementById('app');
+  const activeLeague = await getActiveLeague();
+
+  if (!activeLeague) {
+    app.innerHTML = `
+      <h2>Gestión de Jugadores</h2>
+      <p style="color: red; font-weight: bold;">⚠️ Debes activar o crear una liga primero para gestionar jugadores.</p>
+      <a href="#leagues">Ir a Gestión de Ligas</a>
+    `;
+    return;
+  }
+
+  // Traemos los equipos de la liga activa para el select del formulario
+  const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+  const allPlayers = await dbGetAll('players');
+
+  // Filtramos los jugadores que pertenecen a los equipos de la liga activa
+  const teamIds = teams.map(t => t.id);
+  const leaguePlayers = allPlayers.filter(p => teamIds.includes(Number(p.teamId)));
+
+  let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+  
+  let playersListHTML = '';
+  if (leaguePlayers.length === 0) {
+    playersListHTML = '<p>No hay jugadores registrados en los equipos de esta liga.</p>';
+  } else {
+    playersListHTML = leaguePlayers.map(p => {
+      const playerTeam = teams.find(t => t.id === Number(p.teamId));
+      return `
+        <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
+          <h3>${p.name} (#${p.dorsal})</h3>
+          <p><strong>Equipo:</strong> ${playerTeam ? playerTeam.name : 'Sin equipo'} | <strong>Posición:</strong> ${p.position}</p>
+          <p><strong>Anotaciones/Goles:</strong> ${p.goals || 0}</p>
+          <a href="#player/${p.id}">Ver Perfil del Jugador</a>
+        </div>
+      `;
+    }).join('');
+  }
+
+  app.innerHTML = `
+    <h2>Gestión de Jugadores (${activeLeague.name})</h2>
+
+    ${teams.length === 0 ? '<p style="color: orange;">⚠️ Debes crear al menos un equipo antes de registrar jugadores.</p>' : `
+      <form id="form-create-player" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+        <h3>Registrar Nuevo Jugador</h3>
+        <div>
+          <label>Nombre Completo:</label><br>
+          <input type="text" id="player-name" required placeholder="Ej: Lionel Messi">
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Dorsal / Número:</label><br>
+          <input type="number" id="player-dorsal" required placeholder="10">
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Posición:</label><br>
+          <input type="text" id="player-position" placeholder="Ej: Delantero / Base / Rematador">
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Equipo:</label><br>
+          <select id="player-team" required>
+            ${teamsOptionsHTML}
+          </select>
+        </div>
+        <button type="submit" style="margin-top: 15px;">Guardar Jugador</button>
+      </form>
+    `}
+
+    <hr>
+    <h3>Jugadores Registrados</h3>
+    <div id="players-container">${playersListHTML}</div>
   `;
+
+  const form = document.getElementById('form-create-player');
+  if (form) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const newPlayer = {
+        name: document.getElementById('player-name').value,
+        dorsal: Number(document.getElementById('player-dorsal').value),
+        position: document.getElementById('player-position').value,
+        teamId: Number(document.getElementById('player-team').value),
+        goals: 0
+      };
+
+      await dbPut('players', newPlayer);
+      renderPlayers(); // Recargar vista
+    });
+  }
 }
 
-export function renderPlayerDetail(id) {
-  document.getElementById('app').innerHTML = `
-    <h2>Detalle del Jugador</h2>
-    <p>Mostrando perfil individual para el jugador ID: <strong>${id}</strong></p>
+export async function renderPlayerDetail(id) {
+  const app = document.getElementById('app');
+  const players = await dbGetAll('players');
+  const player = players.find(p => p.id === Number(id));
+
+  if (!player) {
+    app.innerHTML = '<h2>Jugador no encontrado</h2><a href="#players">Volver</a>';
+    return;
+  }
+
+  const teams = await dbGetAll('teams');
+  const team = teams.find(t => t.id === Number(player.teamId));
+
+  app.innerHTML = `
+    <h2>Perfil de Jugador</h2>
+    <div style="border: 1px solid #ccc; padding: 20px; border-radius: 5px;">
+      <h3>${player.name}</h3>
+      <p><strong>Dorsal:</strong> #${player.dorsal}</p>
+      <p><strong>Posición:</strong> ${player.position}</p>
+      <p><strong>Equipo actual:</strong> ${team ? team.name : 'Desconocido'}</p>
+      <p><strong>Goles / Puntos anotados:</strong> ${player.goals || 0}</p>
+    </div>
+    <br>
+    <a href="#players">⬅ Volver a Jugadores</a>
   `;
 }
 
