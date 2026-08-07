@@ -1,6 +1,7 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex } from '../services/db.js';
+import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
+
 
 export async function renderDashboard() {
   const app = document.getElementById('app');
@@ -500,43 +501,18 @@ export async function renderMatchDetail(id) {
     });
   }
 
-  // Listener para finalizar partido y actualizar estadísticas de equipos
+  // Reemplazar la escucha del botón btn-finish-match en renderMatchDetail
+  
+
   const finishBtn = document.getElementById('btn-finish-match');
   if (finishBtn) {
     finishBtn.addEventListener('click', async () => {
-      match.status = 'completed';
-      await dbPut('matches', match);
-
-      // Actualizar tabla del Local
-      homeTeam.pj = (homeTeam.pj || 0) + 1;
-      homeTeam.gf = (homeTeam.gf || 0) + match.homeScore;
-      homeTeam.gc = (homeTeam.gc || 0) + match.awayScore;
-
-      // Actualizar tabla del Visitante
-      awayTeam.pj = (awayTeam.pj || 0) + 1;
-      awayTeam.gf = (awayTeam.gf || 0) + match.awayScore;
-      awayTeam.gc = (awayTeam.gc || 0) + match.homeScore;
-
-      // Puntos
-      if (match.homeScore > match.awayScore) {
-        homeTeam.pg = (homeTeam.pg || 0) + 1;
-        homeTeam.points = (homeTeam.points || 0) + 3;
-        awayTeam.pp = (awayTeam.pp || 0) + 1;
-      } else if (match.homeScore < match.awayScore) {
-        awayTeam.pg = (awayTeam.pg || 0) + 1;
-        awayTeam.points = (awayTeam.points || 0) + 3;
-        homeTeam.pp = (homeTeam.pp || 0) + 1;
-      } else {
-        homeTeam.pe = (homeTeam.pe || 0) + 1;
-        awayTeam.pe = (awayTeam.pe || 0) + 1;
-        homeTeam.points = (homeTeam.points || 0) + 1;
-        awayTeam.points = (awayTeam.points || 0) + 1;
+      try {
+        await finishMatchTransaction(match.id, match.homeScore, match.awayScore);
+        renderMatchDetail(id);
+      } catch (err) {
+        alert(err.message || 'Error al finalizar el partido');
       }
-
-      await dbPut('teams', homeTeam);
-      await dbPut('teams', awayTeam);
-
-      renderMatchDetail(id);
     });
   }
 }
