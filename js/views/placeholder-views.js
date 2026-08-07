@@ -274,29 +274,42 @@ export async function renderTeams() {
   }
 
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+  const defaultLogo = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='50' viewBox='0 0 24 24' fill='none' stroke='%23ccc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'%3E%3C/path%3E%3C/svg%3E";
 
   let teamsListHTML = '';
   if (teams.length === 0) {
     teamsListHTML = '<p>No hay equipos registrados en esta liga aún.</p>';
   } else {
-    teamsListHTML = teams.map(t => `
-      <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
-        <div>
-          <h3>${t.name}</h3>
-          <p><strong>PJ:</strong> ${t.pj || 0} | <strong>PG:</strong> ${t.pg || 0} | <strong>PP:</strong> ${t.pp || 0} | <strong>Puntos:</strong> ${t.points || 0}</p>
-          <a href="#team/${t.id}">Ver Detalle del Equipo</a>
+    teamsListHTML = teams.map(t => {
+      const primaryColor = t.primaryColor || '#007bff';
+      const secondaryColor = t.secondaryColor || '#6c757d';
+      const logoUrl = t.logoUrl && t.logoUrl.trim() !== '' ? t.logoUrl : defaultLogo;
+
+      return `
+        <div style="border: 1px solid #ccc; border-left: 6px solid ${primaryColor}; padding: 12px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <img src="${logoUrl}" alt="Escudo de ${t.name}" style="width: 45px; height: 45px; object-fit: contain; border-radius: 50%; background: #f8f9fa; border: 1px solid #ddd;" onerror="this.onerror=null; this.src='${defaultLogo}';">
+            <div>
+              <h3 style="margin: 0 0 5px 0; color: ${primaryColor};">${t.name}</h3>
+              <p style="margin: 0; font-size: 0.9em;"><strong>PJ:</strong> ${t.pj || 0} | <strong>PG:</strong> ${t.pg || 0} | <strong>PP:</strong> ${t.pp || 0} | <strong>Puntos:</strong> ${t.points || 0}</p>
+              <div style="display: flex; gap: 6px; margin-top: 5px;">
+                <span style="display: inline-block; width: 12px; height: 12px; background: ${primaryColor}; border-radius: 50%;" title="Color Principal"></span>
+                <span style="display: inline-block; width: 12px; height: 12px; background: ${secondaryColor}; border-radius: 50%;" title="Color Secundario"></span>
+              </div>
+              <a href="#team/${t.id}" style="display: inline-block; margin-top: 5px;">Ver Detalle del Equipo</a>
+            </div>
+          </div>
+          <div>
+            <button class="btn-edit-team" data-id="${t.id}" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">✏️ Editar</button>
+            <button class="btn-delete-team" data-id="${t.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">
+              🗑️ Eliminar
+            </button>
+          </div>
         </div>
-        <div>
-          <button class="btn-edit-team" data-id="${t.id}" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">✏️ Editar</button>
-          <button class="btn-delete-team" data-id="${t.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">
-            🗑️ Eliminar
-          </button>
-        </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
   }
 
-  // Comprobar límite si es Playoffs
   const isPlayoffs = activeLeague.format === 'playoffs';
   const maxAllowed = activeLeague.maxTeams || 16;
   const isLimitReached = isPlayoffs && teams.length >= maxAllowed;
@@ -314,7 +327,21 @@ export async function renderTeams() {
         <h3>Registrar Nuevo Equipo</h3>
         <div>
           <label>Nombre del Equipo:</label><br>
-          <input type="text" id="team-name" required placeholder="Ej: Los Rayos FC">
+          <input type="text" id="team-name" required placeholder="Ej: Los Rayos FC" style="width: 100%; padding: 7px; margin-top: 4px;">
+        </div>
+        <div style="display: flex; gap: 15px; margin-top: 10px;">
+          <div style="flex: 1;">
+            <label>Color Principal:</label><br>
+            <input type="color" id="team-primary-color" value="#007bff" style="width: 100%; height: 35px; border: 1px solid #ccc; padding: 2px; cursor: pointer; margin-top: 4px;">
+          </div>
+          <div style="flex: 1;">
+            <label>Color Secundario:</label><br>
+            <input type="color" id="team-secondary-color" value="#6c757d" style="width: 100%; height: 35px; border: 1px solid #ccc; padding: 2px; cursor: pointer; margin-top: 4px;">
+          </div>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>URL del Escudo / Logo:</label><br>
+          <input type="url" id="team-logo" placeholder="https://ejemplo.com/escudo.png" style="width: 100%; padding: 7px; margin-top: 4px;">
         </div>
         <button type="submit" style="margin-top: 15px;">Guardar Equipo</button>
       </form>
@@ -325,12 +352,14 @@ export async function renderTeams() {
     <div id="teams-container">${teamsListHTML}</div>
   `;
 
-  // Listener para crear equipo
   const createForm = document.getElementById('form-create-team');
   if (createForm) {
     createForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const nameInput = document.getElementById('team-name').value.trim();
+      const primaryColor = document.getElementById('team-primary-color').value;
+      const secondaryColor = document.getElementById('team-secondary-color').value;
+      const logoUrl = document.getElementById('team-logo').value.trim();
 
       if (!nameInput) {
         alert('⚠️ El nombre del equipo no puede estar vacío.');
@@ -339,13 +368,11 @@ export async function renderTeams() {
 
       const existingTeams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
 
-      // Validación 1: Límite de equipos en playoffs
       if (isPlayoffs && existingTeams.length >= maxAllowed) {
         alert(`⚠️ No puedes agregar más de ${maxAllowed} equipos en esta liga de Playoffs.`);
         return;
       }
 
-      // Validación 2: Nombre duplicado
       const isDuplicate = existingTeams.some(t => t.name.toLowerCase() === nameInput.toLowerCase());
       if (isDuplicate) {
         alert(`⚠️ Ya existe un equipo llamado "${nameInput}" en esta liga.`);
@@ -355,6 +382,9 @@ export async function renderTeams() {
       const newTeam = {
         leagueId: activeLeague.id,
         name: nameInput,
+        primaryColor,
+        secondaryColor,
+        logoUrl,
         pj: 0,
         pg: 0,
         pe: 0,
@@ -369,7 +399,6 @@ export async function renderTeams() {
     });
   }
 
-  // Listener para editar equipo
   app.querySelectorAll('.btn-edit-team').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const teamId = Number(e.target.dataset.id);
@@ -378,25 +407,29 @@ export async function renderTeams() {
       if (!team) return;
 
       const newName = prompt('Nuevo nombre del equipo:', team.name);
-      if (newName !== null && newName.trim() !== '') {
+      if (newName === null) return;
+
+      const newLogo = prompt('Nueva URL del Escudo/Logo:', team.logoUrl || '');
+      if (newLogo === null) return;
+
+      if (newName.trim() !== '') {
         const isDuplicate = leagueTeams.some(t => t.id !== teamId && t.name.toLowerCase() === newName.trim().toLowerCase());
         if (isDuplicate) {
           alert(`⚠️ Ya existe un equipo llamado "${newName.trim()}" en esta liga.`);
           return;
         }
         team.name = newName.trim();
-        await dbPut('teams', team);
-        renderTeams();
       }
+      team.logoUrl = newLogo.trim();
+
+      await dbPut('teams', team);
+      renderTeams();
     });
   });
 
-  // Listener para eliminar equipo con validación de partidos existentes
   app.querySelectorAll('.btn-delete-team').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const teamId = Number(e.target.dataset.id);
-
-      // Validar si el equipo ya tiene partidos programados o jugados
       const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
       const hasMatches = matches.some(m => Number(m.homeTeamId) === teamId || Number(m.awayTeamId) === teamId);
 
@@ -503,26 +536,31 @@ export async function renderPlayers() {
 
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const allPlayers = await dbGetAll('players');
+  const defaultAvatar = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='50' height='50' viewBox='0 0 24 24' fill='none' stroke='%23ccc' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2'%3E%3C/path%3E%3Ccircle cx='12' cy='7' r='4'%3E%3C/circle%3E%3C/svg%3E";
 
   const teamIds = teams.map(t => t.id);
   const leaguePlayers = allPlayers.filter(p => teamIds.includes(Number(p.teamId)));
 
   let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
   
-  // Función auxiliar para renderizar solo la lista de jugadores (usada por el filtro y búsqueda)
   const renderPlayersList = (playersToRender) => {
     if (playersToRender.length === 0) {
       return '<p>No se encontraron jugadores con los filtros seleccionados.</p>';
     }
     return playersToRender.map(p => {
       const playerTeam = teams.find(t => t.id === Number(p.teamId));
+      const avatarUrl = p.avatarUrl && p.avatarUrl.trim() !== '' ? p.avatarUrl : defaultAvatar;
+
       return `
-        <div class="player-card" style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
-          <div>
-            <h3>${p.name} (#${p.dorsal})</h3>
-            <p><strong>Equipo:</strong> ${playerTeam ? playerTeam.name : 'Sin equipo'} | <strong>Posición:</strong> ${p.position}</p>
-            <p><strong>Anotaciones/Goles:</strong> ${p.goals || 0}</p>
-            <a href="#player/${p.id}">Ver Perfil del Jugador</a>
+        <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <img src="${avatarUrl}" alt="Avatar de ${p.name}" style="width: 45px; height: 45px; object-fit: cover; border-radius: 50%; background: #f8f9fa; border: 1px solid #ddd;" onerror="this.onerror=null; this.src='${defaultAvatar}';">
+            <div>
+              <h3 style="margin: 0 0 3px 0;">${p.name} (#${p.dorsal})</h3>
+              <p style="margin: 0; font-size: 0.9em;"><strong>Equipo:</strong> ${playerTeam ? playerTeam.name : 'Sin equipo'} | <strong>Posición:</strong> ${p.position}</p>
+              <p style="margin: 0; font-size: 0.9em;"><strong>Anotaciones/Goles:</strong> ${p.goals || 0}</p>
+              <a href="#player/${p.id}" style="display: inline-block; margin-top: 3px;">Ver Perfil del Jugador</a>
+            </div>
           </div>
           <div>
             <button class="btn-edit-player" data-id="${p.id}" style="background: #ffc107; color: black; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">✏️ Editar</button>
@@ -543,21 +581,25 @@ export async function renderPlayers() {
         <h3>Registrar Nuevo Jugador</h3>
         <div>
           <label>Nombre Completo:</label><br>
-          <input type="text" id="player-name" required placeholder="Ej: Lionel Messi">
+          <input type="text" id="player-name" required placeholder="Ej: Lionel Messi" style="width: 100%; padding: 7px; margin-top: 4px;">
         </div>
         <div style="margin-top: 10px;">
           <label>Dorsal / Número:</label><br>
-          <input type="number" id="player-dorsal" required placeholder="10" min="0" max="99">
+          <input type="number" id="player-dorsal" required placeholder="10" min="0" max="99" style="width: 100%; padding: 7px; margin-top: 4px;">
         </div>
         <div style="margin-top: 10px;">
           <label>Posición:</label><br>
-          <input type="text" id="player-position" placeholder="Ej: Delantero / Base / Rematador">
+          <input type="text" id="player-position" placeholder="Ej: Delantero / Base / Rematador" style="width: 100%; padding: 7px; margin-top: 4px;">
         </div>
         <div style="margin-top: 10px;">
           <label>Equipo:</label><br>
-          <select id="player-team" required>
+          <select id="player-team" required style="width: 100%; padding: 7px; margin-top: 4px;">
             ${teamsOptionsHTML}
           </select>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>URL de Avatar / Foto:</label><br>
+          <input type="url" id="player-avatar" placeholder="https://ejemplo.com/foto.png" style="width: 100%; padding: 7px; margin-top: 4px;">
         </div>
         <button type="submit" style="margin-top: 15px;">Guardar Jugador</button>
       </form>
@@ -577,7 +619,6 @@ export async function renderPlayers() {
     <div id="players-container">${renderPlayersList(leaguePlayers)}</div>
   `;
 
-  // Lógica de Filtrado y Búsqueda con Debounce
   const searchInput = document.getElementById('search-player-input');
   const filterTeamSelect = document.getElementById('filter-team-select');
   const container = document.getElementById('players-container');
@@ -595,21 +636,23 @@ export async function renderPlayers() {
     });
 
     container.innerHTML = renderPlayersList(filtered);
-    attachPlayerEvents(); // Reasignar eventos a los elementos filtrados
+    attachPlayerEvents();
   };
 
-  searchInput.addEventListener('input', () => {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-      applyFilters();
-    }, 300); // 300ms de retraso (debounce)
-  });
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        applyFilters();
+      }, 300);
+    });
+  }
 
-  filterTeamSelect.addEventListener('change', applyFilters);
+  if (filterTeamSelect) {
+    filterTeamSelect.addEventListener('change', applyFilters);
+  }
 
-  // Función para agrupar los listeners de los botones de la lista (Editar / Eliminar)
   function attachPlayerEvents() {
-    // Listener para crear jugador
     const form = document.getElementById('form-create-player');
     if (form && !form.dataset.listenerAttached) {
       form.dataset.listenerAttached = 'true';
@@ -619,6 +662,7 @@ export async function renderPlayers() {
         const dorsal = Number(document.getElementById('player-dorsal').value);
         const position = document.getElementById('player-position').value.trim();
         const teamId = Number(document.getElementById('player-team').value);
+        const avatarUrl = document.getElementById('player-avatar').value.trim();
 
         if (!name) {
           alert('⚠️ El nombre del jugador no puede estar vacío.');
@@ -641,6 +685,7 @@ export async function renderPlayers() {
           dorsal,
           position: position || 'Sin posición',
           teamId,
+          avatarUrl,
           goals: 0
         };
 
@@ -649,7 +694,6 @@ export async function renderPlayers() {
       });
     }
 
-    // Listeners de Editar
     app.querySelectorAll('.btn-edit-player').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         const playerId = Number(e.target.dataset.id);
@@ -660,31 +704,17 @@ export async function renderPlayers() {
         const newName = prompt('Nuevo nombre del jugador:', player.name);
         if (newName === null) return;
 
-        const newDorsalStr = prompt('Nuevo dorsal (0-99):', player.dorsal);
-        if (newDorsalStr === null) return;
-        const newDorsal = Number(newDorsalStr);
-
-        const newPosition = prompt('Nueva posición:', player.position);
-        if (newPosition === null) return;
+        const newAvatar = prompt('Nueva URL de Avatar/Foto:', player.avatarUrl || '');
+        if (newAvatar === null) return;
 
         if (newName.trim() !== '') player.name = newName.trim();
-        if (!isNaN(newDorsal) && newDorsal >= 0 && newDorsal <= 99) {
-          const teamId = Number(player.teamId);
-          const duplicate = freshPlayers.some(p => Number(p.teamId) === teamId && Number(p.dorsal) === newDorsal && Number(p.id) !== playerId);
-          if (duplicate) {
-            alert(`⚠️ El dorsal #${newDorsal} ya está ocupado por otro jugador en este equipo.`);
-            return;
-          }
-          player.dorsal = newDorsal;
-        }
-        if (newPosition.trim() !== '') player.position = newPosition.trim();
+        player.avatarUrl = newAvatar.trim();
 
         await dbPut('players', player);
         renderPlayers();
       });
     });
 
-    // Listeners de Eliminar
     app.querySelectorAll('.btn-delete-player').forEach(btn => {
       btn.addEventListener('click', async (e) => {
         const playerId = Number(e.target.dataset.id);
