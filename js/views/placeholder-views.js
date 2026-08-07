@@ -1,5 +1,6 @@
 // js/views/placeholder-views.js
 import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex } from '../services/db.js';
+import { getSportTerms } from '../services/sports-terms.js';
 
 export function renderDashboard() {
   document.getElementById('app').innerHTML = `
@@ -373,11 +374,138 @@ export async function renderMatches() {
   }
 }
 
-export function renderMatchDetail(id) {
-  document.getElementById('app').innerHTML = `
-    <h2>Registro de Partido</h2>
-    <p>Marcador y eventos para el partido ID: <strong>${id}</strong></p>
+
+
+export async function renderMatchDetail(id) {
+  const app = document.getElementById('app');
+  const activeLeague = await getActiveLeague();
+  const terms = getSportTerms(activeLeague ? activeLeague.sport : 'futbol');
+
+  const matches = await dbGetAll('matches');
+  const match = matches.find(m => m.id === Number(id));
+
+  if (!match) {
+    app.innerHTML = '<h2>Partido no encontrado</h2><a href="#matches">Volver a partidos</a>';
+    return;
+  }
+
+  const teams = await dbGetAll('teams');
+  const homeTeam = teams.find(t => t.id === Number(match.homeTeamId));
+  const awayTeam = teams.find(t => t.id === Number(match.awayTeamId));
+
+  const allPlayers = await dbGetAll('players');
+  const matchPlayers = allPlayers.filter(p => p.teamId === homeTeam.id || p.teamId === awayTeam.id);
+
+  const events = await dbGetByIndex('events', 'matchId', match.id);
+
+  let playersOptionsHTML = matchPlayers.map(p => `<option value="${p.id}">${p.name} (${p.teamId === homeTeam.id ? homeTeam.name : awayTeam.name})</option>`).join('');
+
+  let eventsListHTML = events.map(e => {
+    const player = allPlayers.find(p => p.id === Number(e.playerId));
+    return `<li>${terms.icon} ${terms.event} de <strong>${player ? player.name : 'Jugador'}</strong> (Minuto ${e.minute}')</li>`;
+  }).join('');
+
+  app.innerHTML = `
+    <h2>Registro de Partido ${terms.icon}</h2>
+    <div style="background: #e9ecef; padding: 20px; border-radius: 8px; text-align: center; margin-bottom: 20px;">
+      <h3>${homeTeam ? homeTeam.name : 'Local'} vs ${awayTeam ? awayTeam.name : 'Visitante'}</h3>
+      <h1 style="font-size: 3rem; margin: 10px 0;">${match.homeScore} - ${match.awayScore}</h1>
+      <p><strong>Estado:</strong> ${match.status === 'completed' ? 'Finalizado 🏁' : 'En Curso / Pendiente ⏳'}</p>
+    </div>
+
+    ${match.status === 'completed' ? '<p style="color: green; font-weight: bold;">Este partido ya fue finalizado y sus puntos fueron sumados a la tabla.</p>' : `
+      <form id="form-add-event" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+        <h3>Anotar Evento (${terms.event})</h3>
+        <div>
+          <label>Jugador de la anotación:</label><br>
+          <select id="event-player" required>${playersOptionsHTML}</select>
+        </div>
+        <div style="margin-top: 10px;">
+          <label>Minuto / Tiempo:</label><br>
+          <input type="number" id="event-minute" required placeholder="Ej: 25">
+        </div>
+        <button type="submit" style="margin-top: 15px;">Registrar ${terms.event}</button>
+      </form>
+
+      <button id="btn-finish-match" style="background: green; color: white; padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer;">Finalizar Partido</button>
+    `}
+
+    <hr>
+    <h3>Historial de ${terms.events}</h3>
+    <ul>${eventsListHTML || '<p>No hay eventos registrados aún.</p>'}</ul>
+    <br>
+    <a href="#matches">⬅ Volver a Partidos</a>
   `;
+
+  // Listener para agregar evento / gol / punto
+  const eventForm = document.getElementById('form-add-event');
+  if (eventForm) {
+    eventForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const playerId = Number(document.getElementById('event-player').value);
+      const minute = Number(document.getElementById('event-minute').value);
+      const player = allPlayers.find(p => p.id === playerId);
+
+      // Sumar marcador al equipo
+      if (player.teamId === homeTeam.id) {
+        match.homeScore += 1;
+      } else {
+        match.awayScore += 1;
+      }
+
+      // Guardar partido actualizado
+      await dbPut('matches', match);
+
+      // Registrar evento
+      await dbPut('events', { matchId: match.id, playerId, minute, type: terms.event });
+
+      // Sumar gol al jugador
+      player.goals = (player.goals || 0) + 1;
+      await dbPut('players', player);
+
+      renderMatchDetail(id);
+    });
+  }
+
+  // Listener para finalizar partido y actualizar estadísticas de equipos
+  const finishBtn = document.getElementById('btn-finish-match');
+  if (finishBtn) {
+    finishBtn.addEventListener('click', async () => {
+      match.status = 'completed';
+      await dbPut('matches', match);
+
+      // Actualizar tabla del Local
+      homeTeam.pj = (homeTeam.pj || 0) + 1;
+      homeTeam.gf = (homeTeam.gf || 0) + match.homeScore;
+      homeTeam.gc = (homeTeam.gc || 0) + match.awayScore;
+
+      // Actualizar tabla del Visitante
+      awayTeam.pj = (awayTeam.pj || 0) + 1;
+      awayTeam.gf = (awayTeam.gf || 0) + match.awayScore;
+      awayTeam.gc = (awayTeam.gc || 0) + match.homeScore;
+
+      // Puntos
+      if (match.homeScore > match.awayScore) {
+        homeTeam.pg = (homeTeam.pg || 0) + 1;
+        homeTeam.points = (homeTeam.points || 0) + 3;
+        awayTeam.pp = (awayTeam.pp || 0) + 1;
+      } else if (match.homeScore < match.awayScore) {
+        awayTeam.pg = (awayTeam.pg || 0) + 1;
+        awayTeam.points = (awayTeam.points || 0) + 3;
+        homeTeam.pp = (homeTeam.pp || 0) + 1;
+      } else {
+        homeTeam.pe = (homeTeam.pe || 0) + 1;
+        awayTeam.pe = (awayTeam.pe || 0) + 1;
+        homeTeam.points = (homeTeam.points || 0) + 1;
+        awayTeam.points = (awayTeam.points || 0) + 1;
+      }
+
+      await dbPut('teams', homeTeam);
+      await dbPut('teams', awayTeam);
+
+      renderMatchDetail(id);
+    });
+  }
 }
 
 export function renderStats() {
