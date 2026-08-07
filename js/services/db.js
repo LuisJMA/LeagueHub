@@ -1,6 +1,7 @@
 // js/services/db.js
 
 import { calculateMatchPoints } from '../utils/sports-rules.js';
+import { generateRoundRobin, generatePlayoffs } from '../utils/fixture-generator.js';
 const DB_NAME = 'leaguehub-db';
 const DB_VERSION = 1;
 
@@ -271,6 +272,48 @@ export async function undoMatchTransaction(matchId) {
         match.homeScore = 0;
         match.awayScore = 0;
         matchesStore.put(match);
+      };
+    };
+  });
+}
+
+export async function generateLeagueFixtureTransaction(leagueId) {
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['teams', 'matches', 'leagues'], 'readwrite');
+    const teamsStore = tx.objectStore('teams');
+    const matchesStore = tx.objectStore('matches');
+    const leaguesStore = tx.objectStore('leagues');
+
+    tx.onerror = (e) => reject(e.target.error);
+    tx.oncomplete = () => resolve(true);
+
+    const leagueReq = leaguesStore.get(leagueId);
+    leagueReq.onsuccess = () => {
+      const league = leagueReq.result;
+      if (!league) return reject('Liga no encontrada');
+
+      const teamsReq = teamsStore.index('leagueId').getAll(leagueId);
+      teamsReq.onsuccess = () => {
+        const teams = teamsReq.result;
+        if (teams.length < 2) return reject('Se necesitan al menos 2 equipos para generar el fixture');
+
+        const fixture = league.format === 'playoffs'
+          ? generatePlayoffs(teams)
+          : generateRoundRobin(teams);
+
+        fixture.forEach(m => {
+          matchesStore.put({
+            leagueId: league.id,
+            homeTeamId: m.homeTeamId,
+            awayTeamId: m.awayTeamId,
+            homeScore: 0,
+            awayScore: 0,
+            status: 'scheduled',
+            round: m.round
+          });
+        });
       };
     };
   });
