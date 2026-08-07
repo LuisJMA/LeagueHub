@@ -358,34 +358,69 @@ export async function generateLeagueFixtureTransaction(leagueId) {
     const matchesStore = tx.objectStore('matches');
     const leaguesStore = tx.objectStore('leagues');
 
-    tx.onerror = (e) => reject(e.target.error);
+    tx.onerror = (e) => reject(e.target.error || 'Error al generar el fixture');
     tx.oncomplete = () => resolve(true);
 
-    const leagueReq = leaguesStore.get(leagueId);
+    const leagueReq = leaguesStore.get(Number(leagueId));
     leagueReq.onsuccess = () => {
       const league = leagueReq.result;
       if (!league) return reject('Liga no encontrada');
 
-      const teamsReq = teamsStore.index('leagueId').getAll(leagueId);
+      const teamsReq = teamsStore.index('leagueId').getAll(league.id);
       teamsReq.onsuccess = () => {
         const teams = teamsReq.result;
-        if (teams.length < 2) return reject('Se necesitan al menos 2 equipos para generar el fixture');
 
-        const fixture = league.format === 'playoffs'
-          ? generatePlayoffs(teams)
-          : generateRoundRobin(teams);
+        // Validaciones por formato
+        if (league.format === 'playoffs') {
+          const validSizes = [4, 8, 16];
+          if (!validSizes.includes(teams.length)) {
+            return reject('Para playoffs debes tener exactamente 4, 8 o 16 equipos registrados.');
+          }
+        } else if (teams.length < 2) {
+          return reject('Se necesitan al menos 2 equipos para generar el fixture.');
+        }
 
-        fixture.forEach(m => {
-          matchesStore.put({
-            leagueId: league.id,
-            homeTeamId: m.homeTeamId,
-            awayTeamId: m.awayTeamId,
-            homeScore: 0,
-            awayScore: 0,
-            status: 'scheduled',
-            round: m.round
+        let matchesToInsert = [];
+
+        if (league.format === 'playoffs') {
+          matchesToInsert = generateBracketMatches(teams, league.id);
+        } else {
+          // Generar liga (Round Robin)
+          const roundsCount = league.rounds || 1;
+          const singleRobin = generateRoundRobin(teams);
+
+          // Primera vuelta
+          singleRobin.forEach(m => {
+            matchesToInsert.push({
+              leagueId: league.id,
+              homeTeamId: m.homeTeamId,
+              awayTeamId: m.awayTeamId,
+              homeScore: 0,
+              awayScore: 0,
+              status: 'scheduled',
+              round: m.round
+            });
           });
-        });
+
+          // Segunda vuelta (si aplica)
+          if (roundsCount === 2) {
+            const totalRoundsFirstLeg = Math.max(...singleRobin.map(m => m.round));
+            singleRobin.forEach(m => {
+              matchesToInsert.push({
+                leagueId: league.id,
+                homeTeamId: m.awayTeamId, // Invierte localía
+                awayTeamId: m.homeTeamId,
+                homeScore: 0,
+                awayScore: 0,
+                status: 'scheduled',
+                round: m.round + totalRoundsFirstLeg
+              });
+            });
+          }
+        }
+
+        // Guardar partidos en DB
+        matchesToInsert.forEach(m => matchesStore.put(m));
       };
     };
   });
