@@ -868,6 +868,16 @@ export async function renderMatches() {
   app.innerHTML = `
     <h2>Gestión de Partidos (${activeLeague.name})</h2>
 
+    ${matches.length === 0 ? `
+      <div style="background: #fff3cd; border: 1px solid #ffeeba; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+        <h3 style="margin-top: 0; color: #856404;">⚠️ Calendario no generado</h3>
+        <p style="margin-bottom: 10px; color: #856404;">Aún no hay partidos registrados para esta liga. Haz clic para crear el fixture automáticamente:</p>
+        <button id="btn-generate-fixture" style="background: #28a745; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-weight: bold;">
+          ⚡ Generar Calendario de Partidos
+        </button>
+      </div>
+    ` : ''}
+
     <!-- Controles de Filtros Avanzados -->
     <div style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
       <h3 style="margin-top: 0;">Filtros Avanzados</h3>
@@ -919,6 +929,27 @@ export async function renderMatches() {
     <div id="matches-container">${renderMatchesList(matches)}</div>
   `;
 
+  // Listener para el botón de generar fixture (si no hay partidos)
+  const btnGenerateFixture = document.getElementById('btn-generate-fixture');
+  if (btnGenerateFixture) {
+    btnGenerateFixture.addEventListener('click', async () => {
+      try {
+        btnGenerateFixture.disabled = true;
+        btnGenerateFixture.textContent = 'Generando...';
+        
+        await generateLeagueFixtureTransaction(activeLeague.id);
+        
+        alert('¡Calendario generado exitosamente!');
+        renderMatches(); // Recarga la vista para mostrar los partidos recién creados
+      } catch (err) {
+        console.error(err);
+        alert('Error al generar el fixture: ' + (err.message || err));
+        btnGenerateFixture.disabled = false;
+        btnGenerateFixture.textContent = '⚡ Generar Calendario de Partidos';
+      }
+    });
+  }
+
   // Referencias a los elementos de control
   const selectRound = document.getElementById('filter-round');
   const selectStatus = document.getElementById('filter-status');
@@ -965,21 +996,23 @@ export async function renderMatches() {
   };
 
   // Escuchar eventos de cambio en todos los filtros
-  selectRound.addEventListener('change', applyFilters);
-  selectStatus.addEventListener('change', applyFilters);
-  selectTeam.addEventListener('change', applyFilters);
-  inputDateStart.addEventListener('input', applyFilters);
-  inputDateEnd.addEventListener('input', applyFilters);
+  if (selectRound) selectRound.addEventListener('change', applyFilters);
+  if (selectStatus) selectStatus.addEventListener('change', applyFilters);
+  if (selectTeam) selectTeam.addEventListener('change', applyFilters);
+  if (inputDateStart) inputDateStart.addEventListener('input', applyFilters);
+  if (inputDateEnd) inputDateEnd.addEventListener('input', applyFilters);
 
   // Botón para restablecer filtros
-  btnReset.addEventListener('click', () => {
-    selectRound.value = '';
-    selectStatus.value = '';
-    selectTeam.value = '';
-    inputDateStart.value = '';
-    inputDateEnd.value = '';
-    container.innerHTML = renderMatchesList(matches);
-  });
+  if (btnReset) {
+    btnReset.addEventListener('click', () => {
+      selectRound.value = '';
+      selectStatus.value = '';
+      selectTeam.value = '';
+      inputDateStart.value = '';
+      inputDateEnd.value = '';
+      container.innerHTML = renderMatchesList(matches);
+    });
+  }
 }
 
 
