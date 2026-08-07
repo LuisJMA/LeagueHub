@@ -1,5 +1,5 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction } from '../services/db.js';
+import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, generateLeagueFixtureTransaction } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
 
 
@@ -361,9 +361,18 @@ export async function renderMatches() {
   app.innerHTML = `
     <h2>Programación de Partidos (${activeLeague.name})</h2>
 
+    <!-- AQUÍ SE AGREGA EL BOTÓN DE GENERACIÓN AUTOMÁTICA -->
+    <div style="background: #e2e3e5; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+      <h3>Generación Automática</h3>
+      <p>Crea el calendario completo para los ${teams.length} equipos de esta liga.</p>
+      <button id="btn-generate-fixture" style="background: #17a2b8; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer;">
+        ⚡ Generar Fixture Automático
+      </button>
+    </div>
+
     ${teams.length < 2 ? '<p style="color: orange;">⚠️ Necesitas al menos 2 equipos para programar un partido.</p>' : `
       <form id="form-create-match" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
-        <h3>Programar Nuevo Partido</h3>
+        <h3>Programar Nuevo Partido Manual</h3>
         <div>
           <label>Equipo Local:</label><br>
           <select id="home-team" required>${teamsOptionsHTML}</select>
@@ -381,6 +390,7 @@ export async function renderMatches() {
     <div id="matches-container">${matchesListHTML}</div>
   `;
 
+  // Listener para crear partido manual
   const form = document.getElementById('form-create-match');
   if (form) {
     form.addEventListener('submit', async (e) => {
@@ -404,6 +414,21 @@ export async function renderMatches() {
 
       await dbPut('matches', newMatch);
       renderMatches();
+    });
+  }
+
+  // AQUÍ SE CONECTA EL EVENTO AL FINAL DE renderMatches
+  const genBtn = document.getElementById('btn-generate-fixture');
+  if (genBtn) {
+    genBtn.addEventListener('click', async () => {
+      if (confirm('¿Generar el calendario automático? Si ya existen partidos se sumarán al listado.')) {
+        try {
+          await generateLeagueFixtureTransaction(activeLeague.id);
+          renderMatches();
+        } catch (err) {
+          alert(err.message || err);
+        }
+      }
     });
   }
 }
