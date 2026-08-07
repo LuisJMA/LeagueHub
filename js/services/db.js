@@ -2,6 +2,7 @@
 
 import { calculateMatchPoints } from '../utils/sports-rules.js';
 import { generateRoundRobin, generatePlayoffs } from '../utils/fixture-generator.js';
+import { generateBracketMatches } from './tournament-logic.js';
 
 const DB_NAME = 'leaguehub-db';
 const DB_VERSION = 1;
@@ -383,7 +384,8 @@ export async function generateLeagueFixtureTransaction(leagueId) {
         let matchesToInsert = [];
 
         if (league.format === 'playoffs') {
-          matchesToInsert = generateBracketMatches(teams, league.id);
+            const teamIds = teams.map(t => t.id);
+            matchesToInsert = generateBracketMatches(league.id, teamIds);
         } else {
           // Generar liga (Round Robin)
           const roundsCount = league.rounds || 1;
