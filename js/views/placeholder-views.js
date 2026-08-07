@@ -275,59 +275,93 @@ export async function renderTeams() {
     `).join('');
   }
 
+  // Comprobar límite si es Playoffs
+  const isPlayoffs = activeLeague.format === 'playoffs';
+  const maxAllowed = activeLeague.maxTeams || 16;
+  const isLimitReached = isPlayoffs && teams.length >= maxAllowed;
+
   app.innerHTML = `
     <h2>Gestión de Equipos (${activeLeague.name})</h2>
-    <form id="form-create-team" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
-      <h3>Registrar Nuevo Equipo</h3>
-      <div>
-        <label>Nombre del Equipo:</label><br>
-        <input type="text" id="team-name" required placeholder="Ej: Los Rayos FC">
+    ${isPlayoffs ? `<p><strong>Límite de formato Playoffs:</strong> ${teams.length} / ${maxAllowed} equipos registrados.</p>` : ''}
+
+    ${isLimitReached ? `
+      <div style="background: #fff3cd; color: #856404; padding: 12px; border-radius: 5px; margin-bottom: 20px;">
+        ⚠️ Se ha alcanzado el límite máximo de ${maxAllowed} equipos configurado para esta liga de eliminación directa.
       </div>
-      <button type="submit" style="margin-top: 15px;">Guardar Equipo</button>
-    </form>
+    ` : `
+      <form id="form-create-team" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+        <h3>Registrar Nuevo Equipo</h3>
+        <div>
+          <label>Nombre del Equipo:</label><br>
+          <input type="text" id="team-name" required placeholder="Ej: Los Rayos FC">
+        </div>
+        <button type="submit" style="margin-top: 15px;">Guardar Equipo</button>
+      </form>
+    `}
 
     <hr>
     <h3>Equipos de la Liga</h3>
     <div id="teams-container">${teamsListHTML}</div>
   `;
 
-  // Listener para crear equipo con validación de nombre único
-  document.getElementById('form-create-team').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const nameInput = document.getElementById('team-name').value.trim();
+  // Listener para crear equipo
+  const createForm = document.getElementById('form-create-team');
+  if (createForm) {
+    createForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nameInput = document.getElementById('team-name').value.trim();
 
-    if (!nameInput) {
-      alert('⚠️ El nombre del equipo no puede estar vacío.');
-      return;
-    }
+      if (!nameInput) {
+        alert('⚠️ El nombre del equipo no puede estar vacío.');
+        return;
+      }
 
-    const existingTeams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
-    const isDuplicate = existingTeams.some(t => t.name.toLowerCase() === nameInput.toLowerCase());
+      const existingTeams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
 
-    if (isDuplicate) {
-      alert(`⚠️ Ya existe un equipo llamado "${nameInput}" en esta liga.`);
-      return;
-    }
+      // Validación 1: Límite de equipos en playoffs
+      if (isPlayoffs && existingTeams.length >= maxAllowed) {
+        alert(`⚠️ No puedes agregar más de ${maxAllowed} equipos en esta liga de Playoffs.`);
+        return;
+      }
 
-    const newTeam = {
-      leagueId: activeLeague.id,
-      name: nameInput,
-      pj: 0,
-      pg: 0,
-      pe: 0,
-      pp: 0,
-      gf: 0,
-      gc: 0,
-      points: 0
-    };
+      // Validación 2: Nombre duplicado
+      const isDuplicate = existingTeams.some(t => t.name.toLowerCase() === nameInput.toLowerCase());
+      if (isDuplicate) {
+        alert(`⚠️ Ya existe un equipo llamado "${nameInput}" en esta liga.`);
+        return;
+      }
 
-    await dbPut('teams', newTeam);
-    renderTeams();
-  });
+      const newTeam = {
+        leagueId: activeLeague.id,
+        name: nameInput,
+        pj: 0,
+        pg: 0,
+        pe: 0,
+        pp: 0,
+        gf: 0,
+        gc: 0,
+        points: 0
+      };
 
+      await dbPut('teams', newTeam);
+      renderTeams();
+    });
+  }
+
+  // Listener para eliminar equipo con validación de partidos existentes
   app.querySelectorAll('.btn-delete-team').forEach(btn => {
     btn.addEventListener('click', async (e) => {
-      const teamId = e.target.dataset.id;
+      const teamId = Number(e.target.dataset.id);
+
+      // Validar si el equipo ya tiene partidos programados o jugados
+      const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
+      const hasMatches = matches.some(m => Number(m.homeTeamId) === teamId || Number(m.awayTeamId) === teamId);
+
+      if (hasMatches) {
+        alert('⚠️ No se puede eliminar este equipo porque ya tiene partidos asignados en el calendario.');
+        return;
+      }
+
       if (confirm('¿Seguro que deseas eliminar este equipo?')) {
         await dbDelete('teams', teamId);
         renderTeams();
