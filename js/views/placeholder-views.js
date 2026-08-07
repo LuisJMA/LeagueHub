@@ -1,5 +1,5 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, generateLeagueFixtureTransaction } from '../services/db.js';
+import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
 
 
@@ -191,10 +191,78 @@ export async function renderTeams() {
   });
 }
 
-export function renderTeamDetail(id) {
-  document.getElementById('app').innerHTML = `
-    <h2>Detalle del Equipo</h2>
-    <p>Mostrando información para el equipo ID: <strong>${id}</strong></p>
+
+
+export async function renderTeamDetail(id) {
+  const app = document.getElementById('app');
+  const teamId = Number(id);
+
+  const teams = await dbGetAll('teams');
+  const team = teams.find(t => t.id === teamId);
+
+  if (!team) {
+    app.innerHTML = '<h2>Equipo no encontrado</h2><a href="#teams">Volver a equipos</a>';
+    return;
+  }
+
+  const activeLeague = await getActiveLeague();
+  const terms = getSportTerms(activeLeague ? activeLeague.sport : 'futbol');
+
+  // Obtener jugadores del equipo
+  const allPlayers = await dbGetAll('players');
+  const teamPlayers = allPlayers.filter(p => Number(p.teamId) === teamId);
+
+  // Obtener partidos del equipo (como local o visitante)
+  const matches = await dbGetByIndex('matches', 'leagueId', team.leagueId);
+  const teamMatches = matches.filter(m => Number(m.homeTeamId) === teamId || Number(m.awayTeamId) === teamId);
+
+  let playersListHTML = teamPlayers.map(p => `
+    <li>
+      <strong>${p.name}</strong> (#${p.dorsal}) - ${p.position || 'Sin posición'} | 
+      <strong>${terms.events}:</strong> ${p.goals || 0}
+    </li>
+  `).join('');
+
+  let matchesListHTML = teamMatches.map(m => {
+    const isHome = Number(m.homeTeamId) === teamId;
+    const opponentId = isHome ? m.awayTeamId : m.homeTeamId;
+    const opponent = teams.find(t => t.id === Number(opponentId));
+    const opponentName = opponent ? opponent.name : 'Rival Desconocido';
+
+    const resultText = m.status === 'completed' 
+      ? `${m.homeScore} - ${m.awayScore}` 
+      : 'Pendiente';
+
+    return `
+      <li>
+        ${isHome ? '<strong>(Local)</strong> vs' : '<strong>(Visitante)</strong> @'} ${opponentName} 
+        | Marcador: <strong>${resultText}</strong> 
+        | Estado: ${m.status === 'completed' ? 'Finalizado 🏁' : 'Programado ⏳'}
+      </li>
+    `;
+  }).join('');
+
+  const diff = (team.gf || 0) - (team.gc || 0);
+
+  app.innerHTML = `
+    <h2>Detalle del Equipo: ${team.name}</h2>
+    
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+      <h3>Estadísticas Generales</h3>
+      <p><strong>Puntos:</strong> ${team.points || 0}</p>
+      <p><strong>Partidos Jugados:</strong> ${team.pj || 0} (PG: ${team.pg || 0} | PE: ${team.pe || 0} | PP: ${team.pp || 0})</p>
+      <p><strong>${terms.gf}:</strong> ${team.gf || 0} | <strong>${terms.gc}:</strong> ${team.gc || 0} | <strong>DIF:</strong> ${diff > 0 ? '+' + diff : diff}</p>
+    </div>
+
+    <h3>Plantilla de Jugadores</h3>
+    <ul>${playersListHTML || '<p>No hay jugadores asignados a este equipo.</p>'}</ul>
+
+    <hr>
+    <h3>Historial de Partidos</h3>
+    <ul>${matchesListHTML || '<p>No hay partidos registrados para este equipo.</p>'}</ul>
+
+    <br>
+    <a href="#teams">⬅ Volver a Equipos</a>
   `;
 }
 
@@ -472,7 +540,13 @@ export async function renderMatchDetail(id) {
       <p><strong>Estado:</strong> ${match.status === 'completed' ? 'Finalizado 🏁' : 'En Curso / Pendiente ⏳'}</p>
     </div>
 
-    ${match.status === 'completed' ? '<p style="color: green; font-weight: bold;">Este partido ya fue finalizado y sus puntos fueron sumados a la tabla.</p>' : `
+    <!-- 1. BOTÓN AGREGADO EN EL HTML PARA ESTADO COMPLETED -->
+    ${match.status === 'completed' ? `
+      <p style="color: green; font-weight: bold;">Este partido ya fue finalizado y sus puntos fueron sumados a la tabla.</p>
+      <button id="btn-undo-match" style="background: #dc3545; color: white; padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer;">
+        ↩️ Revertir Partido (Volver a Pendiente)
+      </button>
+    ` : `
       <form id="form-add-event" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
         <h3>Anotar Evento (${terms.event})</h3>
         <div>
@@ -526,9 +600,7 @@ export async function renderMatchDetail(id) {
     });
   }
 
-  // Reemplazar la escucha del botón btn-finish-match en renderMatchDetail
-  
-
+  // Listener para finalizar el partido
   const finishBtn = document.getElementById('btn-finish-match');
   if (finishBtn) {
     finishBtn.addEventListener('click', async () => {
@@ -537,6 +609,21 @@ export async function renderMatchDetail(id) {
         renderMatchDetail(id);
       } catch (err) {
         alert(err.message || 'Error al finalizar el partido');
+      }
+    });
+  }
+
+  // 2. LISTENER AGREGADO AL FINAL PARA EJECUTAR LA REVERSIÓN
+  const undoBtn = document.getElementById('btn-undo-match');
+  if (undoBtn) {
+    undoBtn.addEventListener('click', async () => {
+      if (confirm('¿Deseas revertir este partido? Se restarán los puntos y goles acumulados en la tabla.')) {
+        try {
+          await undoMatchTransaction(match.id);
+          renderMatchDetail(id);
+        } catch (err) {
+          alert(err.message || 'Error al revertir el partido');
+        }
       }
     });
   }
