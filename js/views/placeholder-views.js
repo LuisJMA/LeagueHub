@@ -177,13 +177,10 @@ export async function renderLeagues() {
 }
 
 
-
-
 export async function renderTeams() {
   const app = document.getElementById('app');
   const activeLeague = await getActiveLeague();
 
-  // Validación: Si no hay liga activa, no se pueden crear equipos
   if (!activeLeague) {
     app.innerHTML = `
       <h2>Gestión de Equipos</h2>
@@ -193,14 +190,12 @@ export async function renderTeams() {
     return;
   }
 
-  // Obtener solo los equipos pertenecientes a la liga activa
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
 
   let teamsListHTML = '';
   if (teams.length === 0) {
     teamsListHTML = '<p>No hay equipos registrados en esta liga aún.</p>';
   } else {
-    // 1. HTML ACTUALIZADO CON BOTÓN DE ELIMINAR Y DISPLAY FLEX
     teamsListHTML = teams.map(t => `
       <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
         <div>
@@ -231,12 +226,27 @@ export async function renderTeams() {
     <div id="teams-container">${teamsListHTML}</div>
   `;
 
-  // Listener para crear equipo
+  // Listener para crear equipo con validación de nombre único
   document.getElementById('form-create-team').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const nameInput = document.getElementById('team-name').value.trim();
+
+    if (!nameInput) {
+      alert('⚠️ El nombre del equipo no puede estar vacío.');
+      return;
+    }
+
+    const existingTeams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+    const isDuplicate = existingTeams.some(t => t.name.toLowerCase() === nameInput.toLowerCase());
+
+    if (isDuplicate) {
+      alert(`⚠️ Ya existe un equipo llamado "${nameInput}" en esta liga.`);
+      return;
+    }
+
     const newTeam = {
       leagueId: activeLeague.id,
-      name: document.getElementById('team-name').value,
+      name: nameInput,
       pj: 0,
       pg: 0,
       pe: 0,
@@ -247,10 +257,9 @@ export async function renderTeams() {
     };
 
     await dbPut('teams', newTeam);
-    renderTeams(); // Recargar vista
+    renderTeams();
   });
 
-  // 2. LISTENER AGREGADO 
   app.querySelectorAll('.btn-delete-team').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const teamId = e.target.dataset.id;
@@ -261,7 +270,6 @@ export async function renderTeams() {
     });
   });
 }
-
 
 
 export async function renderTeamDetail(id) {
@@ -338,8 +346,6 @@ export async function renderTeamDetail(id) {
 }
 
 
-
-
 export async function renderPlayers() {
   const app = document.getElementById('app');
   const activeLeague = await getActiveLeague();
@@ -353,11 +359,9 @@ export async function renderPlayers() {
     return;
   }
 
-  // Traemos los equipos de la liga activa para el select del formulario
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const allPlayers = await dbGetAll('players');
 
-  // Filtramos los jugadores que pertenecen a los equipos de la liga activa
   const teamIds = teams.map(t => t.id);
   const leaguePlayers = allPlayers.filter(p => teamIds.includes(Number(p.teamId)));
 
@@ -367,7 +371,6 @@ export async function renderPlayers() {
   if (leaguePlayers.length === 0) {
     playersListHTML = '<p>No hay jugadores registrados en los equipos de esta liga.</p>';
   } else {
-    // 3. HTML ACTUALIZADO CON BOTÓN DE ELIMINAR Y DISPLAY FLEX
     playersListHTML = leaguePlayers.map(p => {
       const playerTeam = teams.find(t => t.id === Number(p.teamId));
       return `
@@ -398,7 +401,7 @@ export async function renderPlayers() {
         </div>
         <div style="margin-top: 10px;">
           <label>Dorsal / Número:</label><br>
-          <input type="number" id="player-dorsal" required placeholder="10">
+          <input type="number" id="player-dorsal" required placeholder="10" min="0" max="99">
         </div>
         <div style="margin-top: 10px;">
           <label>Posición:</label><br>
@@ -419,24 +422,45 @@ export async function renderPlayers() {
     <div id="players-container">${playersListHTML}</div>
   `;
 
+  // Listener para crear jugador con validación de dorsal único
   const form = document.getElementById('form-create-player');
   if (form) {
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+      const name = document.getElementById('player-name').value.trim();
+      const dorsal = Number(document.getElementById('player-dorsal').value);
+      const position = document.getElementById('player-position').value.trim();
+      const teamId = Number(document.getElementById('player-team').value);
+
+      if (!name) {
+        alert('⚠️ El nombre del jugador no puede estar vacío.');
+        return;
+      }
+
+      if (isNaN(dorsal) || dorsal < 0 || dorsal > 99) {
+        alert('⚠️ Ingresa un número de dorsal válido (entre 0 y 99).');
+        return;
+      }
+
+      const duplicateDorsal = allPlayers.some(p => Number(p.teamId) === teamId && Number(p.dorsal) === dorsal);
+      if (duplicateDorsal) {
+        alert(`⚠️ El dorsal #${dorsal} ya está asignado a otro jugador en este equipo.`);
+        return;
+      }
+
       const newPlayer = {
-        name: document.getElementById('player-name').value,
-        dorsal: Number(document.getElementById('player-dorsal').value),
-        position: document.getElementById('player-position').value,
-        teamId: Number(document.getElementById('player-team').value),
+        name,
+        dorsal,
+        position: position || 'Sin posición',
+        teamId,
         goals: 0
       };
 
       await dbPut('players', newPlayer);
-      renderPlayers(); // Recargar vista
+      renderPlayers();
     });
   }
 
-  // 4. LISTENER AGREGADO 
   app.querySelectorAll('.btn-delete-player').forEach(btn => {
     btn.addEventListener('click', async (e) => {
       const playerId = e.target.dataset.id;
@@ -476,8 +500,6 @@ export async function renderPlayerDetail(id) {
 }
 
 
-
-
 export async function renderMatches() {
   const app = document.getElementById('app');
   const activeLeague = await getActiveLeague();
@@ -494,7 +516,6 @@ export async function renderMatches() {
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
 
-  // Obtener rondas / jornadas unicas disponibles
   const rounds = [...new Set(matches.map(m => m.round).filter(Boolean))].sort((a, b) => a - b);
   
   let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
@@ -571,10 +592,8 @@ export async function renderMatches() {
     <div id="matches-container"></div>
   `;
 
-  // Renderizar la lista inicial de partidos
   renderMatchesList();
 
-  // Listener del filtro por jornada
   const filterSelect = document.getElementById('filter-round');
   if (filterSelect) {
     filterSelect.addEventListener('change', (e) => {
@@ -582,7 +601,7 @@ export async function renderMatches() {
     });
   }
 
-  // Listener para crear partido manual
+  // Listener para crear partido manual con validación de equipos distintos
   const form = document.getElementById('form-create-match');
   if (form) {
     form.addEventListener('submit', async (e) => {
@@ -591,7 +610,7 @@ export async function renderMatches() {
       const awayId = Number(document.getElementById('away-team').value);
 
       if (homeId === awayId) {
-        alert('El equipo local y el visitante no pueden ser el mismo.');
+        alert('⚠️ El equipo local y el visitante no pueden ser el mismo.');
         return;
       }
 
@@ -609,7 +628,6 @@ export async function renderMatches() {
     });
   }
 
-  // Listener para botón de generar fixture
   const genBtn = document.getElementById('btn-generate-fixture');
   if (genBtn) {
     genBtn.addEventListener('click', async () => {
@@ -624,7 +642,6 @@ export async function renderMatches() {
     });
   }
 }
-
 
 
 export async function renderMatchDetail(id) {
@@ -664,7 +681,6 @@ export async function renderMatchDetail(id) {
       <p><strong>Estado:</strong> ${match.status === 'completed' ? 'Finalizado 🏁' : 'En Curso / Pendiente ⏳'}</p>
     </div>
 
-    <!-- 1. BOTÓN AGREGADO EN EL HTML PARA ESTADO COMPLETED -->
     ${match.status === 'completed' ? `
       <p style="color: green; font-weight: bold;">Este partido ya fue finalizado y sus puntos fueron sumados a la tabla.</p>
       <button id="btn-undo-match" style="background: #dc3545; color: white; padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer;">
@@ -679,7 +695,7 @@ export async function renderMatchDetail(id) {
         </div>
         <div style="margin-top: 10px;">
           <label>Minuto / Tiempo:</label><br>
-          <input type="number" id="event-minute" required placeholder="Ej: 25">
+          <input type="number" id="event-minute" required placeholder="Ej: 25" min="1">
         </div>
         <button type="submit" style="margin-top: 15px;">Registrar ${terms.event}</button>
       </form>
@@ -694,29 +710,34 @@ export async function renderMatchDetail(id) {
     <a href="#matches">⬅ Volver a Partidos</a>
   `;
 
-  // Listener para agregar evento / gol / punto
+  // Listener para agregar evento con validación del tiempo/minuto positivo
   const eventForm = document.getElementById('form-add-event');
   if (eventForm) {
     eventForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       const playerId = Number(document.getElementById('event-player').value);
       const minute = Number(document.getElementById('event-minute').value);
-      const player = allPlayers.find(p => p.id === playerId);
 
-      // Sumar marcador al equipo
+      if (isNaN(minute) || minute < 1) {
+        alert('⚠️ Por favor ingresa un minuto o tiempo válido mayor a 0.');
+        return;
+      }
+
+      const player = allPlayers.find(p => p.id === playerId);
+      if (!player) {
+        alert('⚠️ Error al identificar el jugador.');
+        return;
+      }
+
       if (player.teamId === homeTeam.id) {
         match.homeScore += 1;
       } else {
         match.awayScore += 1;
       }
 
-      // Guardar partido actualizado
       await dbPut('matches', match);
-
-      // Registrar evento
       await dbPut('events', { matchId: match.id, playerId, minute, type: terms.event });
 
-      // Sumar gol al jugador
       player.goals = (player.goals || 0) + 1;
       await dbPut('players', player);
 
@@ -724,7 +745,6 @@ export async function renderMatchDetail(id) {
     });
   }
 
-  // Listener para finalizar el partido
   const finishBtn = document.getElementById('btn-finish-match');
   if (finishBtn) {
     finishBtn.addEventListener('click', async () => {
@@ -737,7 +757,6 @@ export async function renderMatchDetail(id) {
     });
   }
 
-  // 2. LISTENER AGREGADO AL FINAL PARA EJECUTAR LA REVERSION
   const undoBtn = document.getElementById('btn-undo-match');
   if (undoBtn) {
     undoBtn.addEventListener('click', async () => {
@@ -752,7 +771,6 @@ export async function renderMatchDetail(id) {
     });
   }
 }
-
 
 
 export async function renderStats() {
