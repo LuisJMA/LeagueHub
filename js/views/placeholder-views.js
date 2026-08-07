@@ -2,10 +2,43 @@
 import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
 
-export function renderDashboard() {
-  document.getElementById('app').innerHTML = `
-    <h2>Dashboard</h2>
-    <p>Resumen de la liga activa e indicadores generales.</p>
+export async function renderDashboard() {
+  const app = document.getElementById('app');
+  const activeLeague = await getActiveLeague();
+
+  if (!activeLeague) {
+    app.innerHTML = `
+      <h2>Dashboard</h2>
+      <p>Bienvenido a LeagueHub. Crea o selecciona una liga activa para ver el resumen del torneo.</p>
+      <a href="#leagues">Ir a Gestión de Ligas</a>
+    `;
+    return;
+  }
+
+  const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+  const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
+  const terms = getSportTerms(activeLeague.sport);
+
+  const completedMatches = matches.filter(m => m.status === 'completed');
+  const pendingMatches = matches.filter(m => m.status !== 'completed');
+
+  app.innerHTML = `
+    <h2>Dashboard - ${activeLeague.name} (${terms.name})</h2>
+    <div style="display: flex; gap: 15px; margin-bottom: 20px;">
+      <div style="background: #007bff; color: white; padding: 15px; border-radius: 5px; flex: 1;">
+        <h3>Equipos</h3>
+        <h2>${teams.length}</h2>
+      </div>
+      <div style="background: #28a745; color: white; padding: 15px; border-radius: 5px; flex: 1;">
+        <h3>Partidos Jugados</h3>
+        <h2>${completedMatches.length}</h2>
+      </div>
+      <div style="background: #ffc107; color: black; padding: 15px; border-radius: 5px; flex: 1;">
+        <h3>Partidos Pendientes</h3>
+        <h2>${pendingMatches.length}</h2>
+      </div>
+    </div>
+    <a href="#stats">Ver Tabla de Posiciones Completa 📊</a>
   `;
 }
 
