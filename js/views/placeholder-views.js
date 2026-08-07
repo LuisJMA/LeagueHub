@@ -406,17 +406,31 @@ export async function renderMatches() {
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
 
+  // Obtener rondas / jornadas únicas disponibles
+  const rounds = [...new Set(matches.map(m => m.round).filter(Boolean))].sort((a, b) => a - b);
+  
   let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+  let roundsOptionsHTML = rounds.map(r => `<option value="${r}">Jornada / Ronda ${r}</option>`).join('');
 
-  let matchesListHTML = '';
-  if (matches.length === 0) {
-    matchesListHTML = '<p>No hay partidos programados en esta liga.</p>';
-  } else {
-    matchesListHTML = matches.map(m => {
+  const renderMatchesList = (selectedRound = 'all') => {
+    const container = document.getElementById('matches-container');
+    if (!container) return;
+
+    const filteredMatches = selectedRound === 'all' 
+      ? matches 
+      : matches.filter(m => m.round === Number(selectedRound));
+
+    if (filteredMatches.length === 0) {
+      container.innerHTML = '<p>No hay partidos para mostrar en esta jornada.</p>';
+      return;
+    }
+
+    container.innerHTML = filteredMatches.map(m => {
       const home = teams.find(t => t.id === Number(m.homeTeamId));
       const away = teams.find(t => t.id === Number(m.awayTeamId));
       return `
         <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
+          <small><strong>Jornada:</strong> ${m.round || 'N/A'}</small>
           <h4>${home ? home.name : 'Equipo 1'} vs ${away ? away.name : 'Equipo 2'}</h4>
           <p><strong>Estado:</strong> ${m.status === 'completed' ? 'Finalizado 🏁' : 'Pendiente ⏳'}</p>
           <p><strong>Resultado:</strong> ${m.homeScore ?? 0} - ${m.awayScore ?? 0}</p>
@@ -424,12 +438,11 @@ export async function renderMatches() {
         </div>
       `;
     }).join('');
-  }
+  };
 
   app.innerHTML = `
     <h2>Programación de Partidos (${activeLeague.name})</h2>
 
-    <!-- AQUÍ SE AGREGA EL BOTÓN DE GENERACIÓN AUTOMÁTICA -->
     <div style="background: #e2e3e5; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
       <h3>Generación Automática</h3>
       <p>Crea el calendario completo para los ${teams.length} equipos de esta liga.</p>
@@ -454,9 +467,32 @@ export async function renderMatches() {
     `}
 
     <hr>
-    <h3>Calendario de Partidos</h3>
-    <div id="matches-container">${matchesListHTML}</div>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+      <h3>Calendario de Partidos</h3>
+      ${rounds.length > 0 ? `
+        <div>
+          <label><strong>Filtrar por Jornada:</strong></label>
+          <select id="filter-round" style="padding: 5px; margin-left: 5px;">
+            <option value="all">Todas las jornadas</option>
+            ${roundsOptionsHTML}
+          </select>
+        </div>
+      ` : ''}
+    </div>
+
+    <div id="matches-container"></div>
   `;
+
+  // Renderizar la lista inicial de partidos
+  renderMatchesList();
+
+  // Listener del filtro por jornada
+  const filterSelect = document.getElementById('filter-round');
+  if (filterSelect) {
+    filterSelect.addEventListener('change', (e) => {
+      renderMatchesList(e.target.value);
+    });
+  }
 
   // Listener para crear partido manual
   const form = document.getElementById('form-create-match');
@@ -485,7 +521,7 @@ export async function renderMatches() {
     });
   }
 
-  // AQUÍ SE CONECTA EL EVENTO AL FINAL DE renderMatches
+  // Listener para botón de generar fixture
   const genBtn = document.getElementById('btn-generate-fixture');
   if (genBtn) {
     genBtn.addEventListener('click', async () => {
