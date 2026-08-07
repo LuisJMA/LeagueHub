@@ -533,3 +533,121 @@ export async function deleteLeagueCascade(leagueId) {
     };
   });
 }
+
+
+/**
+ * Exporta los datos completos de una liga específica junto con sus entidades relacionadas.
+ */
+export async function exportLeagueData(leagueId) {
+  const league = await dbGetById('leagues', Number(leagueId));
+  if (!league) throw new Error('Liga no encontrada');
+
+  const teams = await dbGetByIndex('teams', 'leagueId', Number(leagueId));
+  const teamIds = teams.map(t => t.id);
+
+  const allPlayers = await dbGetAll('players');
+  const players = allPlayers.filter(p => teamIds.includes(Number(p.teamId)));
+
+  const matches = await dbGetByIndex('matches', 'leagueId', Number(leagueId));
+  const matchIds = matches.map(m => m.id);
+
+  const allEvents = await dbGetAll('events');
+  const events = allEvents.filter(e => matchIds.includes(Number(e.matchId)));
+
+  return {
+    league,
+    teams,
+    players,
+    matches,
+    events
+  };
+}
+
+/**
+ * Importa los datos de una liga individual asegurando nuevas IDs para evitar colisiones.
+ */
+export async function importLeagueData(data) {
+  if (!data || !data.league || !Array.isArray(data.teams) || !Array.isArray(data.matches)) {
+    throw new Error('El archivo JSON no tiene una estructura de liga válida.');
+  }
+
+  const db = await openDB();
+
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['leagues', 'teams', 'players', 'matches', 'events'], 'readwrite');
+    
+    tx.onerror = (e) => reject(e.target.error || 'Error al importar la liga');
+    tx.oncomplete = () => resolve(true);
+
+    const leagueStore = tx.objectStore('leagues');
+    const teamStore = tx.objectStore('teams');
+    const playerStore = tx.objectStore('players');
+    const matchStore = tx.objectStore('matches');
+    const eventStore = tx.objectStore('events');
+
+    // 1. Insertar la liga sin ID para que se autogenere
+    const leagueData = { ...data.league };
+    delete leagueData.id;
+    leagueData.isActive = false; // Por seguridad se importa inactiva
+
+    const leagueReq = leagueStore.add(leagueData);
+    
+    leagueReq.onsuccess = (event) => {
+      const newLeagueId = event.target.result;
+      const teamIdMap = {};
+      const matchIdMap = {};
+
+      // 2. Insertar equipos
+      data.teams.forEach(team => {
+        const oldId = team.id;
+        const teamCopy = { ...team, leagueId: newLeagueId };
+        delete teamCopy.id;
+        const req = teamStore.add(teamCopy);
+        req.onsuccess = (e) => {
+          teamIdMap[oldId] = e.target.result;
+        };
+      });
+
+      // 3. Insertar partidos
+      data.matches.forEach(match => {
+        const oldId = match.id;
+        const matchCopy = { 
+          ...match, 
+          leagueId: newLeagueId,
+          homeTeamId: teamIdMap[match.homeTeamId] || match.homeTeamId,
+          awayTeamId: teamIdMap[match.awayTeamId] || match.awayTeamId
+        };
+        delete matchCopy.id;
+        const req = matchStore.add(matchCopy);
+        req.onsuccess = (e) => {
+          matchIdMap[oldId] = e.target.result;
+        };
+      });
+
+      // 4. Insertar jugadores
+      if (Array.isArray(data.players)) {
+        data.players.forEach(player => {
+          const playerCopy = { 
+            ...player, 
+            teamId: teamIdMap[player.teamId] || player.teamId 
+          };
+          delete playerCopy.id;
+          playerStore.add(playerCopy);
+        });
+      }
+
+      // 5. Insertar eventos
+      if (Array.isArray(data.events)) {
+        data.events.forEach(matchEvent => {
+          const eventCopy = { 
+            ...matchEvent, 
+            matchId: matchIdMap[matchEvent.matchId] || matchEvent.matchId,
+            teamId: teamIdMap[matchEvent.teamId] || matchEvent.teamId 
+          };
+          delete eventCopy.id;
+          eventStore.add(eventCopy);
+        });
+      }
+    };
+  });
+}
