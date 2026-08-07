@@ -1,5 +1,6 @@
 // js/services/db.js
 
+import { calculateMatchPoints } from '../utils/sports-rules.js';
 const DB_NAME = 'leaguehub-db';
 const DB_VERSION = 1;
 
@@ -144,4 +145,133 @@ export async function setActiveLeague(leagueId) {
 export async function getActiveLeague() {
   const leagues = await dbGetAll('leagues');
   return leagues.find(l => l.isActive) || null;
+}
+
+
+
+
+/**
+ * Transacción atómica para finalizar un partido y actualizar la tabla de posiciones
+ */
+export async function finishMatchTransaction(matchId, homeScore, awayScore) {
+  const db = await openDB();
+  
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['matches', 'teams', 'leagues'], 'readwrite');
+    const matchesStore = tx.objectStore('matches');
+    const teamsStore = tx.objectStore('teams');
+    const leaguesStore = tx.objectStore('leagues');
+
+    tx.onerror = (e) => reject(e.target.error);
+    tx.oncomplete = () => resolve(true);
+
+    const matchReq = matchesStore.get(matchId);
+    matchReq.onsuccess = () => {
+      const match = matchReq.result;
+      if (!match) return reject('Partido no encontrado');
+
+      const leagueReq = leaguesStore.get(match.leagueId);
+      leagueReq.onsuccess = () => {
+        const league = leagueReq.result;
+        const points = calculateMatchPoints(league.sport, homeScore, awayScore);
+
+        // 1. Actualizar partido
+        match.homeScore = Number(homeScore);
+        match.awayScore = Number(awayScore);
+        match.status = 'completed';
+        matchesStore.put(match);
+
+        // 2. Actualizar Equipo Local
+        const homeTeamReq = teamsStore.get(match.homeTeamId);
+        homeTeamReq.onsuccess = () => {
+          const homeTeam = homeTeamReq.result;
+          homeTeam.pj = (homeTeam.pj || 0) + 1;
+          homeTeam.gf = (homeTeam.gf || 0) + match.homeScore;
+          homeTeam.gc = (homeTeam.gc || 0) + match.awayScore;
+          homeTeam.points = (homeTeam.points || 0) + points.homePoints;
+          if (match.homeScore > match.awayScore) homeTeam.pg = (homeTeam.pg || 0) + 1;
+          else if (match.homeScore < match.awayScore) homeTeam.pp = (homeTeam.pp || 0) + 1;
+          else homeTeam.pe = (homeTeam.pe || 0) + 1;
+          teamsStore.put(homeTeam);
+        };
+
+        // 3. Actualizar Equipo Visitante
+        const awayTeamReq = teamsStore.get(match.awayTeamId);
+        awayTeamReq.onsuccess = () => {
+          const awayTeam = awayTeamReq.result;
+          awayTeam.pj = (awayTeam.pj || 0) + 1;
+          awayTeam.gf = (awayTeam.gf || 0) + match.awayScore;
+          awayTeam.gc = (awayTeam.gc || 0) + match.homeScore;
+          awayTeam.points = (awayTeam.points || 0) + points.awayPoints;
+          if (match.awayScore > match.homeScore) awayTeam.pg = (awayTeam.pg || 0) + 1;
+          else if (match.awayScore < match.homeScore) awayTeam.pp = (awayTeam.pp || 0) + 1;
+          else awayTeam.pe = (awayTeam.pe || 0) + 1;
+          teamsStore.put(awayTeam);
+        };
+      };
+    };
+  });
+}
+
+/**
+ * Transacción atómica para revertir un partido finalizado
+ */
+export async function undoMatchTransaction(matchId) {
+  const db = await openDB();
+  
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(['matches', 'teams', 'leagues'], 'readwrite');
+    const matchesStore = tx.objectStore('matches');
+    const teamsStore = tx.objectStore('teams');
+    const leaguesStore = tx.objectStore('leagues');
+
+    tx.onerror = (e) => reject(e.target.error);
+    tx.oncomplete = () => resolve(true);
+
+    const matchReq = matchesStore.get(matchId);
+    matchReq.onsuccess = () => {
+      const match = matchReq.result;
+      if (!match || match.status !== 'completed') return resolve(false);
+
+      const leagueReq = leaguesStore.get(match.leagueId);
+      leagueReq.onsuccess = () => {
+        const league = leagueReq.result;
+        const points = calculateMatchPoints(league.sport, match.homeScore, match.awayScore);
+
+        // Revertir Equipo Local
+        const homeTeamReq = teamsStore.get(match.homeTeamId);
+        homeTeamReq.onsuccess = () => {
+          const homeTeam = homeTeamReq.result;
+          homeTeam.pj = Math.max(0, (homeTeam.pj || 0) - 1);
+          homeTeam.gf = Math.max(0, (homeTeam.gf || 0) - match.homeScore);
+          homeTeam.gc = Math.max(0, (homeTeam.gc || 0) - match.awayScore);
+          homeTeam.points = Math.max(0, (homeTeam.points || 0) - points.homePoints);
+          if (match.homeScore > match.awayScore) homeTeam.pg = Math.max(0, (homeTeam.pg || 0) - 1);
+          else if (match.homeScore < match.awayScore) homeTeam.pp = Math.max(0, (homeTeam.pp || 0) - 1);
+          else homeTeam.pe = Math.max(0, (homeTeam.pe || 0) - 1);
+          teamsStore.put(homeTeam);
+        };
+
+        // Revertir Equipo Visitante
+        const awayTeamReq = teamsStore.get(match.awayTeamId);
+        awayTeamReq.onsuccess = () => {
+          const awayTeam = awayTeamReq.result;
+          awayTeam.pj = Math.max(0, (awayTeam.pj || 0) - 1);
+          awayTeam.gf = Math.max(0, (awayTeam.gf || 0) - match.awayScore);
+          awayTeam.gc = Math.max(0, (awayTeam.gc || 0) - match.homeScore);
+          awayTeam.points = Math.max(0, (awayTeam.points || 0) - points.awayPoints);
+          if (match.awayScore > match.homeScore) awayTeam.pg = Math.max(0, (awayTeam.pg || 0) - 1);
+          else if (match.awayScore < match.homeScore) awayTeam.pp = Math.max(0, (awayTeam.pp || 0) - 1);
+          else awayTeam.pe = Math.max(0, (awayTeam.pe || 0) - 1);
+          teamsStore.put(awayTeam);
+        };
+
+        // Reestablecer partido a pendiente
+        match.status = 'scheduled';
+        match.homeScore = 0;
+        match.awayScore = 0;
+        matchesStore.put(match);
+      };
+    };
+  });
 }
