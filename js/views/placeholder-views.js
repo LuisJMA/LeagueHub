@@ -87,11 +87,73 @@ export async function renderLeagues() {
   });
 }
 
-export function renderTeams() {
-  document.getElementById('app').innerHTML = `
-    <h2>Equipos</h2>
-    <p>Listado de equipos pertenecientes a la liga activa.</p>
+
+
+// Reemplaza la función renderTeams en js/views/placeholder-views.js
+export async function renderTeams() {
+  const app = document.getElementById('app');
+  const activeLeague = await getActiveLeague();
+
+  // Validación: Si no hay liga activa, no se pueden crear equipos
+  if (!activeLeague) {
+    app.innerHTML = `
+      <h2>Gestión de Equipos</h2>
+      <p style="color: red; font-weight: bold;">⚠️ Debes activar o crear una liga primero en la sección de Ligas para poder gestionar equipos.</p>
+      <a href="#leagues">Ir a Gestión de Ligas</a>
+    `;
+    return;
+  }
+
+  // Obtener solo los equipos pertenecientes a la liga activa
+  const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+
+  let teamsListHTML = '';
+  if (teams.length === 0) {
+    teamsListHTML = '<p>No hay equipos registrados en esta liga aún.</p>';
+  } else {
+    teamsListHTML = teams.map(t => `
+      <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
+        <h3>${t.name}</h3>
+        <p><strong>PJ:</strong> ${t.pj || 0} | <strong>PG:</strong> ${t.pg || 0} | <strong>PP:</strong> ${t.pp || 0} | <strong>Puntos:</strong> ${t.points || 0}</p>
+        <a href="#team/${t.id}">Ver Detalle del Equipo</a>
+      </div>
+    `).join('');
+  }
+
+  app.innerHTML = `
+    <h2>Gestión de Equipos (${activeLeague.name})</h2>
+    <form id="form-create-team" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+      <h3>Registrar Nuevo Equipo</h3>
+      <div>
+        <label>Nombre del Equipo:</label><br>
+        <input type="text" id="team-name" required placeholder="Ej: Los Rayos FC">
+      </div>
+      <button type="submit" style="margin-top: 15px;">Guardar Equipo</button>
+    </form>
+
+    <hr>
+    <h3>Equipos de la Liga</h3>
+    <div id="teams-container">${teamsListHTML}</div>
   `;
+
+  // Listener para crear equipo
+  document.getElementById('form-create-team').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const newTeam = {
+      leagueId: activeLeague.id,
+      name: document.getElementById('team-name').value,
+      pj: 0,
+      pg: 0,
+      pe: 0,
+      pp: 0,
+      gf: 0,
+      gc: 0,
+      points: 0
+    };
+
+    await dbPut('teams', newTeam);
+    renderTeams(); // Recargar vista
+  });
 }
 
 export function renderTeamDetail(id) {
