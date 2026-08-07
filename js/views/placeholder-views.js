@@ -1,5 +1,5 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction } from '../services/db.js';
+import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
 
 
@@ -124,7 +124,7 @@ export async function renderLeagues() {
 
 
 
-// Reemplaza la función renderTeams en js/views/placeholder-views.js
+
 export async function renderTeams() {
   const app = document.getElementById('app');
   const activeLeague = await getActiveLeague();
@@ -146,11 +146,17 @@ export async function renderTeams() {
   if (teams.length === 0) {
     teamsListHTML = '<p>No hay equipos registrados en esta liga aún.</p>';
   } else {
+    // 1. HTML ACTUALIZADO CON BOTÓN DE ELIMINAR Y DISPLAY FLEX
     teamsListHTML = teams.map(t => `
-      <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
-        <h3>${t.name}</h3>
-        <p><strong>PJ:</strong> ${t.pj || 0} | <strong>PG:</strong> ${t.pg || 0} | <strong>PP:</strong> ${t.pp || 0} | <strong>Puntos:</strong> ${t.points || 0}</p>
-        <a href="#team/${t.id}">Ver Detalle del Equipo</a>
+      <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h3>${t.name}</h3>
+          <p><strong>PJ:</strong> ${t.pj || 0} | <strong>PG:</strong> ${t.pg || 0} | <strong>PP:</strong> ${t.pp || 0} | <strong>Puntos:</strong> ${t.points || 0}</p>
+          <a href="#team/${t.id}">Ver Detalle del Equipo</a>
+        </div>
+        <button class="btn-delete-team" data-id="${t.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+          🗑️ Eliminar
+        </button>
       </div>
     `).join('');
   }
@@ -188,6 +194,17 @@ export async function renderTeams() {
 
     await dbPut('teams', newTeam);
     renderTeams(); // Recargar vista
+  });
+
+  // 2. LISTENER AGREGADO 
+  app.querySelectorAll('.btn-delete-team').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const teamId = e.target.dataset.id;
+      if (confirm('¿Seguro que deseas eliminar este equipo?')) {
+        await dbDelete('teams', teamId);
+        renderTeams();
+      }
+    });
   });
 }
 
@@ -296,14 +313,20 @@ export async function renderPlayers() {
   if (leaguePlayers.length === 0) {
     playersListHTML = '<p>No hay jugadores registrados en los equipos de esta liga.</p>';
   } else {
+    // 3. HTML ACTUALIZADO CON BOTÓN DE ELIMINAR Y DISPLAY FLEX
     playersListHTML = leaguePlayers.map(p => {
       const playerTeam = teams.find(t => t.id === Number(p.teamId));
       return `
-        <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
-          <h3>${p.name} (#${p.dorsal})</h3>
-          <p><strong>Equipo:</strong> ${playerTeam ? playerTeam.name : 'Sin equipo'} | <strong>Posición:</strong> ${p.position}</p>
-          <p><strong>Anotaciones/Goles:</strong> ${p.goals || 0}</p>
-          <a href="#player/${p.id}">Ver Perfil del Jugador</a>
+        <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <h3>${p.name} (#${p.dorsal})</h3>
+            <p><strong>Equipo:</strong> ${playerTeam ? playerTeam.name : 'Sin equipo'} | <strong>Posición:</strong> ${p.position}</p>
+            <p><strong>Anotaciones/Goles:</strong> ${p.goals || 0}</p>
+            <a href="#player/${p.id}">Ver Perfil del Jugador</a>
+          </div>
+          <button class="btn-delete-player" data-id="${p.id}" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+            🗑️ Eliminar
+          </button>
         </div>
       `;
     }).join('');
@@ -358,6 +381,17 @@ export async function renderPlayers() {
       renderPlayers(); // Recargar vista
     });
   }
+
+  // 4. LISTENER AGREGADO 
+  app.querySelectorAll('.btn-delete-player').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const playerId = e.target.dataset.id;
+      if (confirm('¿Seguro que deseas eliminar este jugador?')) {
+        await dbDelete('players', playerId);
+        renderPlayers();
+      }
+    });
+  });
 }
 
 export async function renderPlayerDetail(id) {
@@ -406,7 +440,7 @@ export async function renderMatches() {
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
 
-  // Obtener rondas / jornadas únicas disponibles
+  // Obtener rondas / jornadas unicas disponibles
   const rounds = [...new Set(matches.map(m => m.round).filter(Boolean))].sort((a, b) => a - b);
   
   let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
@@ -649,7 +683,7 @@ export async function renderMatchDetail(id) {
     });
   }
 
-  // 2. LISTENER AGREGADO AL FINAL PARA EJECUTAR LA REVERSIÓN
+  // 2. LISTENER AGREGADO AL FINAL PARA EJECUTAR LA REVERSION
   const undoBtn = document.getElementById('btn-undo-match');
   if (undoBtn) {
     undoBtn.addEventListener('click', async () => {
