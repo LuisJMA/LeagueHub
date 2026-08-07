@@ -1,5 +1,5 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction } from '../services/db.js';
+import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction, exportDatabase, importDatabase } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
 
 
@@ -699,6 +699,8 @@ export async function renderMatchDetail(id) {
   }
 }
 
+
+
 export async function renderStats() {
   const app = document.getElementById('app');
   const activeLeague = await getActiveLeague();
@@ -799,4 +801,70 @@ export async function renderStats() {
       </tbody>
     </table>
   `;
+}
+
+
+export async function renderSettings() {
+  const app = document.getElementById('app');
+
+  app.innerHTML = `
+    <h2>Configuración y Copia de Seguridad </h2>
+    <p>Administra los datos guardados en la aplicación.</p>
+
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
+      <h3>📦 Exportar Datos</h3>
+      <p>Descarga un archivo '.json' con todas las ligas, equipos, partidos y estadísticas actualizadas.</p>
+      <button id="btn-export-db" style="background: #28a745; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer;">
+        ⬇️ Descargar Copia de Seguridad
+      </button>
+    </div>
+
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px;">
+      <h3>📥 Importar Datos</h3>
+      <p>Carga un archivo de respaldo '.json' previamente generado.</p>
+      <input type="file" id="input-import-db" accept=".json" style="margin-bottom: 10px;"><br>
+      <button id="btn-import-db" style="background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer;">
+        ⬆️ Restaurar Copia de Seguridad
+      </button>
+    </div>
+  `;
+
+  // Listener Exportar
+  document.getElementById('btn-export-db').addEventListener('click', async () => {
+    try {
+      const jsonStr = await exportDatabase();
+      const blob = new Blob([jsonStr], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `leaguehub_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('Error al exportar los datos: ' + err.message);
+    }
+  });
+
+  // Listener Importar
+  document.getElementById('btn-import-db').addEventListener('click', async () => {
+    const fileInput = document.getElementById('input-import-db');
+    const file = fileInput.files[0];
+
+    if (!file) {
+      alert('Por favor selecciona un archivo JSON primero.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      try {
+        await importDatabase(e.target.result);
+        alert('¡Datos importados con éxito!');
+        location.reload();
+      } catch (err) {
+        alert('Error al importar el archivo JSON. Verifica el formato.');
+      }
+    };
+    reader.readAsText(file);
+  });
 }
