@@ -318,3 +318,18 @@ export async function generateLeagueFixtureTransaction(leagueId) {
     };
   });
 }
+
+/**
+ * Operación genérica para eliminar un registro por su ID en un store
+ */
+export async function dbDelete(storeName, id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, 'readwrite');
+    const store = tx.objectStore(storeName);
+    const request = store.delete(Number(id));
+
+    request.onsuccess = () => resolve(true);
+    request.onerror = () => reject(`Error al eliminar registro ${id} de ${storeName}`);
+  });
+}
