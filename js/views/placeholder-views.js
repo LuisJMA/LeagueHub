@@ -509,14 +509,15 @@ export async function renderPlayers() {
 
   let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
   
-  let playersListHTML = '';
-  if (leaguePlayers.length === 0) {
-    playersListHTML = '<p>No hay jugadores registrados en los equipos de esta liga.</p>';
-  } else {
-    playersListHTML = leaguePlayers.map(p => {
+  // Función auxiliar para renderizar solo la lista de jugadores (usada por el filtro y búsqueda)
+  const renderPlayersList = (playersToRender) => {
+    if (playersToRender.length === 0) {
+      return '<p>No se encontraron jugadores con los filtros seleccionados.</p>';
+    }
+    return playersToRender.map(p => {
       const playerTeam = teams.find(t => t.id === Number(p.teamId));
       return `
-        <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+        <div class="player-card" style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
           <div>
             <h3>${p.name} (#${p.dorsal})</h3>
             <p><strong>Equipo:</strong> ${playerTeam ? playerTeam.name : 'Sin equipo'} | <strong>Posición:</strong> ${p.position}</p>
@@ -532,7 +533,7 @@ export async function renderPlayers() {
         </div>
       `;
     }).join('');
-  }
+  };
 
   app.innerHTML = `
     <h2>Gestión de Jugadores (${activeLeague.name})</h2>
@@ -563,95 +564,139 @@ export async function renderPlayers() {
     `}
 
     <hr>
+    <h3>Filtros y Búsqueda</h3>
+    <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+      <input type="text" id="search-player-input" placeholder="Buscar por nombre..." style="flex: 1; min-width: 200px; padding: 8px;">
+      <select id="filter-team-select" style="padding: 8px;">
+        <option value="">Todos los equipos</option>
+        ${teamsOptionsHTML}
+      </select>
+    </div>
+
     <h3>Jugadores Registrados</h3>
-    <div id="players-container">${playersListHTML}</div>
+    <div id="players-container">${renderPlayersList(leaguePlayers)}</div>
   `;
 
-  // Listener para crear jugador con validación de dorsal único
-  const form = document.getElementById('form-create-player');
-  if (form) {
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = document.getElementById('player-name').value.trim();
-      const dorsal = Number(document.getElementById('player-dorsal').value);
-      const position = document.getElementById('player-position').value.trim();
-      const teamId = Number(document.getElementById('player-team').value);
+  // Lógica de Filtrado y Búsqueda con Debounce
+  const searchInput = document.getElementById('search-player-input');
+  const filterTeamSelect = document.getElementById('filter-team-select');
+  const container = document.getElementById('players-container');
 
-      if (!name) {
-        alert('⚠️ El nombre del jugador no puede estar vacío.');
-        return;
-      }
+  let debounceTimer;
 
-      if (isNaN(dorsal) || dorsal < 0 || dorsal > 99) {
-        alert('⚠️ Ingresa un número de dorsal válido (entre 0 y 99).');
-        return;
-      }
+  const applyFilters = () => {
+    const query = searchInput.value.toLowerCase().trim();
+    const selectedTeamId = filterTeamSelect.value;
 
-      const duplicateDorsal = allPlayers.some(p => Number(p.teamId) === teamId && Number(p.dorsal) === dorsal);
-      if (duplicateDorsal) {
-        alert(`⚠️ El dorsal #${dorsal} ya está asignado a otro jugador en este equipo.`);
-        return;
-      }
+    const filtered = leaguePlayers.filter(p => {
+      const matchesName = p.name.toLowerCase().includes(query);
+      const matchesTeam = selectedTeamId === '' || Number(p.teamId) === Number(selectedTeamId);
+      return matchesName && matchesTeam;
+    });
 
-      const newPlayer = {
-        name,
-        dorsal,
-        position: position || 'Sin posición',
-        teamId,
-        goals: 0
-      };
+    container.innerHTML = renderPlayersList(filtered);
+    attachPlayerEvents(); // Reasignar eventos a los elementos filtrados
+  };
 
-      await dbPut('players', newPlayer);
-      renderPlayers();
+  searchInput.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      applyFilters();
+    }, 300); // 300ms de retraso (debounce)
+  });
+
+  filterTeamSelect.addEventListener('change', applyFilters);
+
+  // Función para agrupar los listeners de los botones de la lista (Editar / Eliminar)
+  function attachPlayerEvents() {
+    // Listener para crear jugador
+    const form = document.getElementById('form-create-player');
+    if (form && !form.dataset.listenerAttached) {
+      form.dataset.listenerAttached = 'true';
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = document.getElementById('player-name').value.trim();
+        const dorsal = Number(document.getElementById('player-dorsal').value);
+        const position = document.getElementById('player-position').value.trim();
+        const teamId = Number(document.getElementById('player-team').value);
+
+        if (!name) {
+          alert('⚠️ El nombre del jugador no puede estar vacío.');
+          return;
+        }
+
+        if (isNaN(dorsal) || dorsal < 0 || dorsal > 99) {
+          alert('⚠️ Ingresa un número de dorsal válido (entre 0 y 99).');
+          return;
+        }
+
+        const duplicateDorsal = allPlayers.some(p => Number(p.teamId) === teamId && Number(p.dorsal) === dorsal);
+        if (duplicateDorsal) {
+          alert(`⚠️ El dorsal #${dorsal} ya está asignado a otro jugador en este equipo.`);
+          return;
+        }
+
+        const newPlayer = {
+          name,
+          dorsal,
+          position: position || 'Sin posición',
+          teamId,
+          goals: 0
+        };
+
+        await dbPut('players', newPlayer);
+        renderPlayers();
+      });
+    }
+
+    // Listeners de Editar
+    app.querySelectorAll('.btn-edit-player').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const playerId = Number(e.target.dataset.id);
+        const freshPlayers = await dbGetAll('players');
+        const player = freshPlayers.find(p => Number(p.id) === playerId);
+        if (!player) return;
+
+        const newName = prompt('Nuevo nombre del jugador:', player.name);
+        if (newName === null) return;
+
+        const newDorsalStr = prompt('Nuevo dorsal (0-99):', player.dorsal);
+        if (newDorsalStr === null) return;
+        const newDorsal = Number(newDorsalStr);
+
+        const newPosition = prompt('Nueva posición:', player.position);
+        if (newPosition === null) return;
+
+        if (newName.trim() !== '') player.name = newName.trim();
+        if (!isNaN(newDorsal) && newDorsal >= 0 && newDorsal <= 99) {
+          const teamId = Number(player.teamId);
+          const duplicate = freshPlayers.some(p => Number(p.teamId) === teamId && Number(p.dorsal) === newDorsal && Number(p.id) !== playerId);
+          if (duplicate) {
+            alert(`⚠️ El dorsal #${newDorsal} ya está ocupado por otro jugador en este equipo.`);
+            return;
+          }
+          player.dorsal = newDorsal;
+        }
+        if (newPosition.trim() !== '') player.position = newPosition.trim();
+
+        await dbPut('players', player);
+        renderPlayers();
+      });
+    });
+
+    // Listeners de Eliminar
+    app.querySelectorAll('.btn-delete-player').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const playerId = Number(e.target.dataset.id);
+        if (confirm('¿Seguro que deseas eliminar este jugador?')) {
+          await dbDelete('players', playerId);
+          renderPlayers();
+        }
+      });
     });
   }
 
-  // Listener para editar jugador
-  app.querySelectorAll('.btn-edit-player').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const playerId = Number(e.target.dataset.id);
-      const freshPlayers = await dbGetAll('players');
-      const player = freshPlayers.find(p => Number(p.id) === playerId);
-      if (!player) return;
-
-      const newName = prompt('Nuevo nombre del jugador:', player.name);
-      if (newName === null) return;
-
-      const newDorsalStr = prompt('Nuevo dorsal (0-99):', player.dorsal);
-      if (newDorsalStr === null) return;
-      const newDorsal = Number(newDorsalStr);
-
-      const newPosition = prompt('Nueva posición:', player.position);
-      if (newPosition === null) return;
-
-      if (newName.trim() !== '') player.name = newName.trim();
-      if (!isNaN(newDorsal) && newDorsal >= 0 && newDorsal <= 99) {
-        // Validar si el dorsal ya lo ocupa otro jugador del mismo equipo
-        const teamId = Number(player.teamId);
-        const duplicate = freshPlayers.some(p => Number(p.teamId) === teamId && Number(p.dorsal) === newDorsal && Number(p.id) !== playerId);
-        if (duplicate) {
-          alert(`⚠️ El dorsal #${newDorsal} ya está ocupado por otro jugador en este equipo.`);
-          return;
-        }
-        player.dorsal = newDorsal;
-      }
-      if (newPosition.trim() !== '') player.position = newPosition.trim();
-
-      await dbPut('players', player);
-      renderPlayers();
-    });
-  });
-
-  // Listener para eliminar jugador
-  app.querySelectorAll('.btn-delete-player').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      const playerId = Number(e.target.dataset.id);
-      if (confirm('¿Seguro que deseas eliminar este jugador?')) {
-        await dbDelete('players', playerId);
-        renderPlayers();
-      }
-    });
-  });
+  attachPlayerEvents();
 }
 
 export async function renderPlayerDetail(id) {
