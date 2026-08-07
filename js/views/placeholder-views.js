@@ -1,6 +1,7 @@
 // js/views/placeholder-views.js
 import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction, exportDatabase, importDatabase } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
+import { renderChart } from '../services/charts.js';
 
 
 export async function renderDashboard() {
@@ -18,11 +19,19 @@ export async function renderDashboard() {
 
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
+  const players = await dbGetAll('players');
   const terms = getSportTerms(activeLeague.sport);
 
   const completedMatches = matches.filter(m => m.status === 'completed');
   const pendingMatches = matches.filter(m => m.status !== 'completed');
 
+  // Filtrar jugadores de la liga actual
+  const teamIds = teams.map(t => t.id);
+  const leaguePlayers = players
+    .filter(p => teamIds.includes(Number(p.teamId)))
+    .sort((a, b) => (b.goals || 0) - (a.goals || 0));
+
+  // 1. Inserción del HTML con los canvas para los gráficos
   app.innerHTML = `
     <h2>Dashboard - ${activeLeague.name} (${terms.name})</h2>
     <div style="display: flex; gap: 15px; margin-bottom: 20px;">
@@ -39,8 +48,53 @@ export async function renderDashboard() {
         <h2>${pendingMatches.length}</h2>
       </div>
     </div>
+
+    <!-- Sección de Gráficos del Dashboard -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-top: 20px;">
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+        <h3>Top 5 ${terms.ranking}</h3>
+        <canvas id="chart-top-scorers"></canvas>
+      </div>
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+        <h3>Estado de Partidos</h3>
+        <canvas id="chart-matches-status"></canvas>
+      </div>
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+        <h3>${terms.gf} por Equipo</h3>
+        <canvas id="chart-teams-offense"></canvas>
+      </div>
+    </div>
+
+    <br>
     <a href="#stats">Ver Tabla de Posiciones Completa 📊</a>
   `;
+
+  // 2. Renderizado de gráficos
+  renderChart('chart-top-scorers', 'bar', {
+    labels: leaguePlayers.slice(0, 5).map(p => p.name),
+    datasets: [{
+      label: terms.events,
+      data: leaguePlayers.slice(0, 5).map(p => p.goals || 0),
+      backgroundColor: '#007bff'
+    }]
+  });
+
+  renderChart('chart-matches-status', 'doughnut', {
+    labels: ['Jugados', 'Pendientes'],
+    datasets: [{
+      data: [completedMatches.length, pendingMatches.length],
+      backgroundColor: ['#28a745', '#ffc107']
+    }]
+  });
+
+  renderChart('chart-teams-offense', 'bar', {
+    labels: teams.map(t => t.name),
+    datasets: [{
+      label: terms.gf,
+      data: teams.map(t => t.gf || 0),
+      backgroundColor: '#17a2b8'
+    }]
+  });
 }
 
 export async function renderLeagues() {
@@ -716,6 +770,7 @@ export async function renderStats() {
 
   const terms = getSportTerms(activeLeague.sport);
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
+  const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
   const allPlayers = await dbGetAll('players');
 
   // Ordenar equipos por Puntos y luego por Diferencia de Goles/Puntos
@@ -764,6 +819,7 @@ export async function renderStats() {
     `;
   }).join('');
 
+  // 1. Inserción del HTML con la tabla + los canvas
   app.innerHTML = `
     <h2>Tabla de Posiciones (${activeLeague.name})</h2>
     <table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: center; margin-bottom: 30px;">
@@ -787,7 +843,7 @@ export async function renderStats() {
     </table>
 
     <h3>Top 5 ${terms.ranking} 🏆</h3>
-    <table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: center;">
+    <table border="1" cellpadding="8" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: center; margin-bottom: 30px;">
       <thead>
         <tr style="background: #f4f4f4;">
           <th>#</th>
@@ -800,7 +856,59 @@ export async function renderStats() {
         ${topScorersRows || '<tr><td colspan="4">No hay datos registrados</td></tr>'}
       </tbody>
     </table>
+
+    <!-- Sección de Gráficos de Estadísticas -->
+    <h3>Análisis Gráfico</h3>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px;">
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+        <h3>Promedio de ${terms.gf} por Partido</h3>
+        <canvas id="chart-team-avg"></canvas>
+      </div>
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+        <h3>Distribución de Resultados</h3>
+        <canvas id="chart-results-distribution"></canvas>
+      </div>
+      <div style="background: #f8f9fa; padding: 15px; border-radius: 8px;">
+        <h3>Tabla de Puntos Acumulados</h3>
+        <canvas id="chart-points-leaderboard"></canvas>
+      </div>
+    </div>
   `;
+
+  // Datos para gráfico de resultados
+  const completed = matches.filter(m => m.status === 'completed');
+  const homeWins = completed.filter(m => m.homeScore > m.awayScore).length;
+  const awayWins = completed.filter(m => m.awayScore > m.homeScore).length;
+  const draws = completed.filter(m => m.homeScore === m.awayScore).length;
+
+  // 2. Renderizado de gráficos de estadísticas
+  renderChart('chart-team-avg', 'bar', {
+    labels: teams.map(t => t.name),
+    datasets: [{
+      label: 'Promedio',
+      data: teams.map(t => t.pj ? (t.gf / t.pj).toFixed(2) : 0),
+      backgroundColor: '#e83e8c'
+    }]
+  }, { indexAxis: 'y' });
+
+  renderChart('chart-results-distribution', 'pie', {
+    labels: ['Victorias Local', 'Empates', 'Victorias Visitante'],
+    datasets: [{
+      data: [homeWins, draws, awayWins],
+      backgroundColor: ['#007bff', '#6c757d', '#dc3545']
+    }]
+  });
+
+  renderChart('chart-points-leaderboard', 'line', {
+    labels: teams.map(t => t.name),
+    datasets: [{
+      label: 'Puntos Totales',
+      data: teams.map(t => t.points || 0),
+      borderColor: '#28a745',
+      backgroundColor: 'rgba(40, 167, 69, 0.2)',
+      fill: true
+    }]
+  });
 }
 
 
