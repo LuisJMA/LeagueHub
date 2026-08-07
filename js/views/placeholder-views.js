@@ -1,5 +1,5 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, setActiveLeague, getActiveLeague } from '../services/db.js';
+import { dbGetAll, dbPut, setActiveLeague, getActiveLeague, dbGetByIndex } from '../services/db.js';
 
 export function renderDashboard() {
   document.getElementById('app').innerHTML = `
