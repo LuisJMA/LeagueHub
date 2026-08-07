@@ -743,139 +743,164 @@ export async function renderMatches() {
   const teams = await dbGetByIndex('teams', 'leagueId', activeLeague.id);
   const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
 
-  const isPlayoffs = activeLeague.format === 'playoffs';
-  const rounds = [...new Set(matches.map(m => m.round).filter(Boolean))].sort((a, b) => a - b);
-  
   let teamsOptionsHTML = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
-  let roundsOptionsHTML = rounds.map(r => `<option value="${r}">${isPlayoffs ? 'Ronda / Llave' : 'Jornada'} ${r}</option>`).join('');
 
-  const renderMatchesList = (selectedRound = 'all') => {
-    const container = document.getElementById('matches-container');
-    if (!container) return;
+  // Obtener jornadas o rondas únicas disponibles para el selector de jornada
+  const rounds = [...new Set(matches.map(m => m.round))].sort((a, b) => a - b);
+  let roundsOptionsHTML = rounds.map(r => `<option value="${r}">Jornada / Fecha ${r}</option>`).join('');
 
-    const filteredMatches = selectedRound === 'all' 
-      ? matches 
-      : matches.filter(m => m.round === Number(selectedRound));
-
-    if (filteredMatches.length === 0) {
-      container.innerHTML = '<p>No hay partidos para mostrar en esta jornada o llave.</p>';
-      return;
+  // Función auxiliar para renderizar la lista de partidos filtrados
+  const renderMatchesList = (matchesToRender) => {
+    if (matchesToRender.length === 0) {
+      return '<p>No se encontraron partidos con los filtros seleccionados.</p>';
     }
-
-    container.innerHTML = filteredMatches.map(m => {
-      const home = teams.find(t => t.id === Number(m.homeTeamId));
-      const away = teams.find(t => t.id === Number(m.awayTeamId));
-
-      const homeName = home ? home.name : (isPlayoffs ? 'Por definir' : 'Equipo 1');
-      const awayName = away ? away.name : (isPlayoffs ? 'Por definir' : 'Equipo 2');
+    return matchesToRender.map(m => {
+      const homeTeam = teams.find(t => t.id === Number(m.homeTeamId));
+      const awayTeam = teams.find(t => t.id === Number(m.awayTeamId));
+      const isFinished = m.status === 'finished';
 
       return `
-        <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
-          <small><strong>${isPlayoffs ? 'Fase / Ronda' : 'Jornada'}:</strong> ${m.round || 'N/A'}</small>
-          <h4>${homeName} vs ${awayName}</h4>
-          <p><strong>Estado:</strong> ${m.status === 'completed' ? 'Finalizado 🏁' : 'Pendiente ⏳'}</p>
-          <p><strong>Resultado:</strong> ${m.homeScore ?? 0} - ${m.awayScore ?? 0}</p>
-          ${(home && away) ? `<a href="#match/${m.id}">Cargar Marcador / Eventos</a>` : '<span style="color: #6c757d;">Esperando definición de clasificados</span>'}
+        <div style="border: 1px solid #ccc; padding: 12px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+          <div>
+            <p style="margin: 0 0 5px 0; font-size: 0.9em; color: #666;">
+              <strong>Jornada:</strong> ${m.round} | <strong>Fecha:</strong> ${m.date || 'Sin definir'} | 
+              <span style="color: ${isFinished ? 'green' : 'orange'}; font-weight: bold;">
+                ${isFinished ? '🟢 Finalizado' : '⏳ Programado'}
+              </span>
+            </p>
+            <h3 style="margin: 0;">
+              ${homeTeam ? homeTeam.name : 'Desconocido'} 
+              <span style="background: #eee; padding: 2px 8px; border-radius: 4px;">
+                ${isFinished ? `${m.homeGoals} - ${m.awayGoals}` : 'vs'}
+              </span> 
+              ${awayTeam ? awayTeam.name : 'Desconocido'}
+            </h3>
+          </div>
+          <div>
+            <a href="#match/${m.id}" style="background: #007bff; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; display: inline-block;">
+              ${isFinished ? 'Ver Detalles' : 'Gestionar / Jugar'}
+            </a>
+          </div>
         </div>
       `;
     }).join('');
   };
 
   app.innerHTML = `
-    <h2>Programación de Partidos (${activeLeague.name})</h2>
+    <h2>Gestión de Partidos (${activeLeague.name})</h2>
 
-    <div style="background: #e2e3e5; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
-      <h3>Generación Automática</h3>
-      <p>
-        ${isPlayoffs 
-          ? `Genera el cuadro de eliminación directa para los ${teams.length} equipos registrados.` 
-          : `Crea el calendario completo (${activeLeague.rounds || 1} vuelta/s) para los ${teams.length} equipos.`}
-      </p>
-      <button id="btn-generate-fixture" style="background: #17a2b8; color: white; border: none; padding: 10px; border-radius: 4px; cursor: pointer;">
-        ⚡ Generar Fixture Automático
-      </button>
-    </div>
-
-    ${!isPlayoffs && teams.length >= 2 ? `
-      <form id="form-create-match" style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
-        <h3>Programar Nuevo Partido Manual</h3>
+    <!-- Controles de Filtros Avanzados -->
+    <div style="background: #f4f4f4; padding: 15px; margin-bottom: 20px; border-radius: 5px;">
+      <h3 style="margin-top: 0;">Filtros Avanzados</h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px;">
+        
+        <!-- Filtro por Jornada -->
         <div>
-          <label>Equipo Local:</label><br>
-          <select id="home-team" required>${teamsOptionsHTML}</select>
-        </div>
-        <div style="margin-top: 10px;">
-          <label>Equipo Visitante:</label><br>
-          <select id="away-team" required>${teamsOptionsHTML}</select>
-        </div>
-        <button type="submit" style="margin-top: 15px;">Crear Partido</button>
-      </form>
-    ` : ''}
-
-    <hr>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-      <h3>Calendario de Partidos</h3>
-      ${rounds.length > 0 ? `
-        <div>
-          <label><strong>Filtrar por ${isPlayoffs ? 'Ronda' : 'Jornada'}:</strong></label>
-          <select id="filter-round" style="padding: 5px; margin-left: 5px;">
-            <option value="all">Ver todo</option>
+          <label>Jornada / Ronda:</label><br>
+          <select id="filter-round" style="width: 100%; padding: 8px;">
+            <option value="">Todas las jornadas</option>
             ${roundsOptionsHTML}
           </select>
         </div>
-      ` : ''}
+
+        <!-- Selector por Estado -->
+        <div>
+          <label>Estado:</label><br>
+          <select id="filter-status" style="width: 100%; padding: 8px;">
+            <option value="">Todos</option>
+            <option value="scheduled">Programados</option>
+            <option value="finished">Finalizados</option>
+          </select>
+        </div>
+
+        <!-- Selector por Equipo -->
+        <div>
+          <label>Equipo:</label><br>
+          <select id="filter-team" style="width: 100%; padding: 8px;">
+            <option value="">Todos los equipos</option>
+            ${teamsOptionsHTML}
+          </select>
+        </div>
+
+        <!-- Inputs de Fecha -->
+        <div>
+          <label>Fecha Inicio:</label><br>
+          <input type="date" id="filter-date-start" style="width: 100%; padding: 7px;">
+        </div>
+        <div>
+          <label>Fecha Fin:</label><br>
+          <input type="date" id="filter-date-end" style="width: 100%; padding: 7px;">
+        </div>
+
+      </div>
+      <button id="btn-reset-filters" style="margin-top: 10px; background: #6c757d; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer;">Limpiar Filtros</button>
     </div>
 
-    <div id="matches-container"></div>
+    <h3>Calendario de Partidos</h3>
+    <div id="matches-container">${renderMatchesList(matches)}</div>
   `;
 
-  renderMatchesList();
+  // Referencias a los elementos de control
+  const selectRound = document.getElementById('filter-round');
+  const selectStatus = document.getElementById('filter-status');
+  const selectTeam = document.getElementById('filter-team');
+  const inputDateStart = document.getElementById('filter-date-start');
+  const inputDateEnd = document.getElementById('filter-date-end');
+  const btnReset = document.getElementById('btn-reset-filters');
+  const container = document.getElementById('matches-container');
 
-  const filterSelect = document.getElementById('filter-round');
-  if (filterSelect) {
-    filterSelect.addEventListener('change', (e) => {
-      renderMatchesList(e.target.value);
-    });
-  }
+  // Lógica de Filtrado Combinado en Cadena
+  const applyFilters = () => {
+    const roundVal = selectRound.value;
+    const statusVal = selectStatus.value;
+    const teamVal = selectTeam.value;
+    const dateStartVal = inputDateStart.value;
+    const dateEndVal = inputDateEnd.value;
 
-  const form = document.getElementById('form-create-match');
-  if (form) {
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const homeId = Number(document.getElementById('home-team').value);
-      const awayId = Number(document.getElementById('away-team').value);
+    const filtered = matches.filter(m => {
+      // 1. Filtro por Jornada
+      const matchesRound = roundVal === '' || String(m.round) === String(roundVal);
 
-      if (homeId === awayId) {
-        alert('⚠️ El equipo local y el visitante no pueden ser el mismo.');
-        return;
+      // 2. Filtro por Estado
+      const matchesStatus = statusVal === '' || m.status === statusVal;
+
+      // 3. Filtro por Equipo (local o visitante)
+      const matchesTeam = teamVal === '' || 
+        Number(m.homeTeamId) === Number(teamVal) || 
+        Number(m.awayTeamId) === Number(teamVal);
+
+      // 4. Filtro por Rango de Fechas
+      let matchesDate = true;
+      if (m.date) {
+        if (dateStartVal && m.date < dateStartVal) matchesDate = false;
+        if (dateEndVal && m.date > dateEndVal) matchesDate = false;
+      } else if (dateStartVal || dateEndVal) {
+        // Si el partido no tiene fecha asignada pero se busca por fecha, se excluye
+        matchesDate = false;
       }
 
-      const newMatch = {
-        leagueId: activeLeague.id,
-        homeTeamId: homeId,
-        awayTeamId: awayId,
-        homeScore: 0,
-        awayScore: 0,
-        status: 'scheduled'
-      };
-
-      await dbPut('matches', newMatch);
-      renderMatches();
+      return matchesRound && matchesStatus && matchesTeam && matchesDate;
     });
-  }
 
-  const genBtn = document.getElementById('btn-generate-fixture');
-  if (genBtn) {
-    genBtn.addEventListener('click', async () => {
-      if (confirm('¿Generar el calendario automático?')) {
-        try {
-          await generateLeagueFixtureTransaction(activeLeague.id);
-          renderMatches();
-        } catch (err) {
-          alert(err.message || err);
-        }
-      }
-    });
-  }
+    container.innerHTML = renderMatchesList(filtered);
+  };
+
+  // Escuchar eventos de cambio en todos los filtros
+  selectRound.addEventListener('change', applyFilters);
+  selectStatus.addEventListener('change', applyFilters);
+  selectTeam.addEventListener('change', applyFilters);
+  inputDateStart.addEventListener('input', applyFilters);
+  inputDateEnd.addEventListener('input', applyFilters);
+
+  // Botón para restablecer filtros
+  btnReset.addEventListener('click', () => {
+    selectRound.value = '';
+    selectStatus.value = '';
+    selectTeam.value = '';
+    inputDateStart.value = '';
+    inputDateEnd.value = '';
+    container.innerHTML = renderMatchesList(matches);
+  });
 }
 
 
