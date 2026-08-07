@@ -898,6 +898,43 @@ export async function renderStats() {
   const matches = await dbGetByIndex('matches', 'leagueId', activeLeague.id);
   const allPlayers = await dbGetAll('players');
 
+  const isPlayoffs = activeLeague.format === 'playoffs';
+
+  // Si es Playoffs, renderizar cuadro de llaves
+  if (isPlayoffs) {
+    app.innerHTML = `
+      <h2>Cuadro de Playoffs (${activeLeague.name})</h2>
+      ${matches.length === 0 ? '<p>No se ha generado el fixture de eliminatoria aún.</p>' : ''}
+      <div style="display: flex; gap: 20px; overflow-x: auto; padding: 10px 0;">
+        ${[1, 2, 3].map(round => {
+          const roundMatches = matches.filter(m => m.round === round);
+          if (roundMatches.length === 0) return '';
+          const roundName = round === 1 ? 'Cuartos / Octavos' : round === 2 ? 'Semifinales' : 'Final';
+          return `
+            <div style="min-width: 220px; background: #f8f9fa; padding: 10px; border-radius: 5px;">
+              <h4>${roundName}</h4>
+              ${roundMatches.map(m => {
+                const home = teams.find(t => t.id === Number(m.homeTeamId));
+                const away = teams.find(t => t.id === Number(m.awayTeamId));
+                return `
+                  <div style="background: white; border: 1px solid #ddd; padding: 8px; margin-bottom: 8px; border-radius: 4px;">
+                    <div style="font-weight: ${m.winnerId === m.homeTeamId ? 'bold' : 'normal'}">
+                      ${home ? home.name : 'Por definir'} (${m.homeScore ?? 0})
+                    </div>
+                    <div style="font-weight: ${m.winnerId === m.awayTeamId ? 'bold' : 'normal'}">
+                      ${away ? away.name : 'Por definir'} (${m.awayScore ?? 0})
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+    return;
+  }
+
   // Ordenar equipos por Puntos y luego por Diferencia de Goles/Puntos
   teams.sort((a, b) => {
     const diffA = (a.gf || 0) - (a.gc || 0);
@@ -1041,7 +1078,7 @@ export async function renderSettings() {
   const app = document.getElementById('app');
 
   app.innerHTML = `
-    <h2>Configuración y Copia de Seguridad </h2>
+    <h2>Configuración y Copia de Seguridad</h2>
     <p>Administra los datos guardados en la aplicación.</p>
 
     <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 20px;">
