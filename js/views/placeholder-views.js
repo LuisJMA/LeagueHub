@@ -1,5 +1,5 @@
 // js/views/placeholder-views.js
-import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction, exportDatabase, importDatabase } from '../services/db.js';
+import { dbGetAll, dbPut, dbDelete, setActiveLeague, getActiveLeague, dbGetByIndex, finishMatchTransaction, undoMatchTransaction, generateLeagueFixtureTransaction, exportDatabase, importDatabase, deleteLeagueCascade } from '../services/db.js';
 import { getSportTerms } from '../services/sports-terms.js';
 import { renderChart } from '../services/charts.js';
 
@@ -113,10 +113,19 @@ export async function renderLeagues() {
     leaguesListHTML = '<p>No hay ligas registradas aún.</p>';
   } else {
     leaguesListHTML = leagues.map(l => `
-      <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px;">
-        <h3>${l.name} ${l.isActive ? '🟢 (Activa)' : ''}</h3>
-        <p><strong>Deporte:</strong> ${l.sport} | <strong>Formato:</strong> ${l.format}</p>
-        ${!l.isActive ? `<button data-id="${l.id}" class="btn-activate">Establecer como Activa</button>` : ''}
+      <div style="border: 1px solid #ccc; padding: 10px; margin-bottom: 10px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <h3>${l.name} ${l.isActive ? '🟢 (Activa)' : ''}</h3>
+          <p>
+            <strong>Deporte:</strong> ${l.sport} | 
+            <strong>Formato:</strong> ${l.format === 'playoffs' ? 'Eliminación Directa' : 'Todos contra Todos'} 
+            ${l.format === 'league' || l.format === 'round-robin' ? `(${l.rounds || 1} vuelta/s)` : `(Máx. ${l.maxTeams || '4, 8 o 16'} eq.)`}
+          </p>
+        </div>
+        <div>
+          ${!l.isActive ? `<button data-id="${l.id}" class="btn-activate">Establecer como Activa</button>` : ''}
+          <button data-id="${l.id}" class="btn-delete-league" style="background: #dc3545; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; margin-left: 5px;">🗑️ Eliminar</button>
+        </div>
       </div>
     `).join('');
   }
@@ -140,10 +149,29 @@ export async function renderLeagues() {
       <div style="margin-top: 10px;">
         <label>Formato:</label><br>
         <select id="league-format">
-          <option value="round-robin">Todos contra Todos</option>
-          <option value="playoffs">Eliminación Directa</option>
+          <option value="round-robin">Todos contra Todos (Liga)</option>
+          <option value="playoffs">Eliminación Directa (Playoffs)</option>
         </select>
       </div>
+
+      <!-- Configuración Dinámica -->
+      <div id="group-rounds" style="margin-top: 10px;">
+        <label>Vueltas:</label><br>
+        <select id="league-rounds">
+          <option value="1">1 (Ida sola)</option>
+          <option value="2">2 (Ida y Vuelta)</option>
+        </select>
+      </div>
+
+      <div id="group-max-teams" style="margin-top: 10px; display: none;">
+        <label>Cantidad de Equipos Permitidos:</label><br>
+        <select id="league-max-teams">
+          <option value="4">4 Equipos (Semifinales directas)</option>
+          <option value="8">8 Equipos (Cuartos de final)</option>
+          <option value="16">16 Equipos (Octavos de final)</option>
+        </select>
+      </div>
+
       <button type="submit" style="margin-top: 15px;">Guardar Liga</button>
     </form>
 
@@ -152,17 +180,39 @@ export async function renderLeagues() {
     <div id="leagues-container">${leaguesListHTML}</div>
   `;
 
+  // Cambiar campos dinámicos según el formato
+  const formatSelect = document.getElementById('league-format');
+  const roundsGroup = document.getElementById('group-rounds');
+  const maxTeamsGroup = document.getElementById('group-max-teams');
+
+  formatSelect.addEventListener('change', (e) => {
+    if (e.target.value === 'playoffs') {
+      roundsGroup.style.display = 'none';
+      maxTeamsGroup.style.display = 'block';
+    } else {
+      roundsGroup.style.display = 'block';
+      maxTeamsGroup.style.display = 'none';
+    }
+  });
+
   // Listener para crear liga
   document.getElementById('form-create-league').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const formatValue = document.getElementById('league-format').value;
+    
     const newLeague = {
       name: document.getElementById('league-name').value,
       sport: document.getElementById('league-sport').value,
-      format: document.getElementById('league-format').value,
-      isActive: leagues.length === 0 // Si es la primera, queda activa automáticamente
+      format: formatValue,
+      rounds: formatValue === 'playoffs' ? 1 : Number(document.getElementById('league-rounds').value),
+      maxTeams: formatValue === 'playoffs' ? Number(document.getElementById('league-max-teams').value) : null,
+      isActive: leagues.length === 0
     };
 
-    await dbPut('leagues', newLeague);
+    const newId = await dbPut('leagues', newLeague);
+    if (leagues.length === 0) {
+      await setActiveLeague(newId);
+    }
     renderLeagues();
   });
 
@@ -172,6 +222,21 @@ export async function renderLeagues() {
       const id = Number(e.target.dataset.id);
       await setActiveLeague(id);
       renderLeagues();
+    });
+  });
+
+  // Listener para eliminar liga en cascada
+  app.querySelectorAll('.btn-delete-league').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      const id = Number(e.target.dataset.id);
+      if (confirm('¿Seguro que deseas eliminar esta liga? Se borrarán en cascada todos sus equipos, jugadores, partidos y eventos de forma permanente.')) {
+        const currentActive = await getActiveLeague();
+        await deleteLeagueCascade(id);
+        if (currentActive && currentActive.id === id) {
+          localStorage.removeItem('activeLeagueId');
+        }
+        renderLeagues();
+      }
     });
   });
 }
